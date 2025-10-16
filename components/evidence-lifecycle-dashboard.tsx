@@ -49,7 +49,7 @@ interface EvidenceItem {
 }
 
 export default function EvidenceLifecycleDashboard() {
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null)
   const [activeTab, setActiveTab] = useState("search")
@@ -78,6 +78,15 @@ export default function EvidenceLifecycleDashboard() {
   useEffect(() => {
     fetchEvidenceItems()
   }, [])
+
+  // Log selected vs current role
+  useEffect(() => {
+    try {
+      const selectedRole = typeof window !== 'undefined' ? localStorage.getItem('lv_role_override') || localStorage.getItem('lv_desired_role') : null
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] Roles', { selectedRole: selectedRole || user?.role, currentRole: user?.role })
+    } catch {}
+  }, [user?.role])
 
   // Filter evidence items based on search query
   const filteredEvidence = evidenceItems.filter(

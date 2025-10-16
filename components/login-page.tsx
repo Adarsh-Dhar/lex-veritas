@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { AuthClient } from "@dfinity/auth-client"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, Info, Lock } from "lucide-react"
@@ -14,6 +15,7 @@ export default function LoginPage() {
   const [principal, setPrincipal] = useState<string>("Click \"Whoami\" to see your principal ID")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [selectedRole, setSelectedRole] = useState<string>("")
 
   const identityProvider = useMemo(() => {
     const envUrl = process.env.NEXT_PUBLIC_II_URL
@@ -52,6 +54,13 @@ export default function LoginPage() {
         ...(isLocalII ? { derivationOrigin: window.location.origin } : {}),
         onSuccess: async () => {
           setIsAuthenticated(true)
+          try {
+            // Persist desired role for post-login registration handled in auth-context
+            localStorage.setItem("lv_desired_role", selectedRole)
+            localStorage.setItem("lv_role_override", selectedRole)
+            // eslint-disable-next-line no-console
+            console.info('[Login] Selected role', { selectedRole })
+          } catch {}
           // Refresh so AuthProvider restores II session and loads dashboard
           try { window.location.href = "/" } catch {}
         },
@@ -137,10 +146,30 @@ export default function LoginPage() {
             </div>
           </div>
 
+          <div className="mb-6 grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Choose your role</label>
+              <Select value={selectedRole} onValueChange={setSelectedRole}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Roles</SelectLabel>
+                    <SelectItem value="ANALYST">Analyst</SelectItem>
+                    <SelectItem value="PROSECUTOR">Prosecutor</SelectItem>
+                    <SelectItem value="AUDITOR">Auditor</SelectItem>
+                    <SelectItem value="ADMIN">Admin</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             {!isAuthenticated ? (
-              <Button type="button" variant="default" disabled={busy || !authClient} onClick={login}>
-                {busy ? "Opening Internet Identity..." : "Login with Internet Identity"}
+              <Button type="button" variant="default" disabled={busy || !authClient || !selectedRole} onClick={login}>
+                {busy ? "Opening Internet Identity..." : (!selectedRole ? "Select a role to continue" : "Login with Internet Identity")}
               </Button>
             ) : (
               <Button type="button" variant="outline" disabled={busy} onClick={logout}>
