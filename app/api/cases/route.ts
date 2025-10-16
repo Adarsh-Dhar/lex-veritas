@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, authorize, createErrorResponse, createSuccessResponse } from '@/lib/auth'
+import { createCase as createCaseOnChain } from '@/lib/contract'
 
 export async function GET(request: NextRequest) {
   try {
@@ -102,7 +103,13 @@ export async function POST(request: NextRequest) {
       return createErrorResponse('Lead investigator not found', 400, 'INVESTIGATOR_NOT_FOUND')
     }
 
-    // Create case
+    // First create the case on-chain; only proceed if successful
+    const onchainResult = await createCaseOnChain(caseNumber)
+    if ('err' in onchainResult) {
+      return createErrorResponse(`On-chain error: ${onchainResult.err}`, 400, 'ONCHAIN_ERROR')
+    }
+
+    // Create case in the database
     const newCase = await prisma.case.create({
       data: {
         caseNumber,

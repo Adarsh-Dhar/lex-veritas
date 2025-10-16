@@ -13,6 +13,9 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@dfinity/agent": "^3.3.0",
+    "@dfinity/auth-client": "^3.3.0",
+    "@dfinity/candid": "^3.3.0",
     "@hookform/resolvers": "^3.10.0",
     "@prisma/client": "^6.17.1",
     "@radix-ui/react-accordion": "1.2.2",
@@ -78,6 +81,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "postcss": "^8.5",
+    "postcss-import": "^16.1.1",
     "tailwindcss": "^4.1.9",
     "tsx": "^4.20.6",
     "tw-animate-css": "1.3.3",

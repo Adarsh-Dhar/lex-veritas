@@ -13,7 +13,7 @@ import { AlertCircle, UserPlus } from "lucide-react"
 import Link from "next/link"
 
 export default function SignupPage() {
-  const { signup, isLoading } = useAuth()
+  const { signup, loginWithII, isLoading } = useAuth()
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -168,6 +168,12 @@ export default function SignupPage() {
                 Sign in
               </Link>
             </p>
+          </div>
+
+          <div className="mt-4">
+            <Button type="button" variant="outline" className="w-full" disabled={isLoading} onClick={loginWithII}>
+              Continue with Internet Identity
+            </Button>
           </div>
         </CardContent>
       </Card>

@@ -4,11 +4,11 @@ import { hashPassword, generateToken, setAuthCookie, createErrorResponse, create
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, password, badgeNumber, role = 'ANALYST' } = await request.json()
+    const { name, email, password, badgeNumber, role = 'ANALYST', internetIdentityPrincipal } = await request.json()
 
-    // Validate required fields
-    if (!name || !email || !password || !badgeNumber) {
-      return createErrorResponse('Name, email, password, and badge number are required', 400, 'MISSING_FIELDS')
+    // Validate required fields (if II principal provided, password is optional)
+    if (!name || !email || !badgeNumber) {
+      return createErrorResponse('Name, email, and badge number are required', 400, 'MISSING_FIELDS')
     }
 
     // Validate email format
@@ -17,9 +17,11 @@ export async function POST(request: NextRequest) {
       return createErrorResponse('Invalid email format', 400, 'INVALID_EMAIL')
     }
 
-    // Validate password strength
-    if (password.length < 6) {
-      return createErrorResponse('Password must be at least 6 characters long', 400, 'WEAK_PASSWORD')
+    // Validate password strength when using password flow
+    if (!internetIdentityPrincipal) {
+      if (!password || password.length < 6) {
+        return createErrorResponse('Password must be at least 6 characters long', 400, 'WEAK_PASSWORD')
+      }
     }
 
     // Validate role
@@ -42,13 +44,13 @@ export async function POST(request: NextRequest) {
       return createErrorResponse('User with this email or badge number already exists', 400, 'USER_EXISTS')
     }
 
-    // Hash password
-    const passwordHash = await hashPassword(password)
+    // Hash password only for password-based signup
+    const passwordHash = internetIdentityPrincipal ? `ii:${internetIdentityPrincipal}` : await hashPassword(password)
 
     // Create user
     const user = await prisma.user.create({
       data: {
-        principalId: `principal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Generate unique principal ID
+        principalId: internetIdentityPrincipal || `principal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         name,
         email,
         passwordHash,

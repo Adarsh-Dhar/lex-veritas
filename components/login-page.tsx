@@ -12,7 +12,7 @@ import { AlertCircle, Lock } from "lucide-react"
 import Link from "next/link"
 
 export default function LoginPage() {
-  const { login, isLoading } = useAuth()
+  const { login, loginWithII, isLoading } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -82,6 +82,12 @@ export default function LoginPage() {
                 Create one
               </Link>
             </p>
+          </div>
+
+          <div className="mt-4">
+            <Button type="button" variant="outline" className="w-full" disabled={isLoading} onClick={loginWithII}>
+              Sign in with Internet Identity
+            </Button>
           </div>
 
         </CardContent>

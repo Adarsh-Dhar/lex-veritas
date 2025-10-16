@@ -2,6 +2,9 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
+import { AuthClient } from "@dfinity/auth-client"
+import { HttpAgent } from "@dfinity/agent"
+import { createAuthenticatedContractActor, resetContractActorCache } from "@/lib/contract"
 
 export type UserRole = "ANALYST" | "PROSECUTOR" | "ADMIN" | "AUDITOR"
 
@@ -21,6 +24,7 @@ interface AuthContextType {
   signup: (name: string, email: string, password: string, badgeNumber: string, role?: string) => Promise<void>
   logout: () => Promise<void>
   hasPermission: (action: string) => boolean
+  loginWithII: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -134,12 +138,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  const loginWithII = async () => {
+    setIsLoading(true)
+    try {
+      const authClient = await AuthClient.create()
+      await authClient.login({
+        identityProvider: process.env.NEXT_PUBLIC_II_URL,
+        onSuccess: async () => {
+          const identity = await authClient.getIdentity()
+          const agent = new HttpAgent({ identity })
+          // Create authenticated canister actor (not strictly needed here but available for future calls)
+          await createAuthenticatedContractActor(identity)
+
+          // Ask backend to establish a session using principal (maps II -> app user)
+          const principalText = identity.getPrincipal().toText()
+          const resp = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ internetIdentityPrincipal: principalText })
+          })
+          const data = await resp.json()
+          if (!resp.ok || !data.success) {
+            throw new Error(data.error || 'Internet Identity login failed')
+          }
+          setUser(data.data)
+        },
+      })
+    } catch (error) {
+      console.error('II login error:', error)
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const logout = async () => {
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include', // Include cookies
       })
+      resetContractActorCache()
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
@@ -153,7 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, hasPermission }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, hasPermission, loginWithII }}>{children}</AuthContext.Provider>
   )
 }
 

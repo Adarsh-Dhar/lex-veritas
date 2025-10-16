@@ -4,7 +4,34 @@ import { verifyPassword, generateToken, setAuthCookie, createErrorResponse, crea
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password } = await request.json()
+    const { email, password, internetIdentityPrincipal } = await request.json()
+
+    // Internet Identity login path
+    if (internetIdentityPrincipal) {
+      const user = await prisma.user.findUnique({
+        where: { principalId: internetIdentityPrincipal },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          badgeNumber: true,
+          status: true,
+        },
+      })
+
+      if (!user) {
+        return createErrorResponse('No account linked to this Internet Identity', 404, 'USER_NOT_FOUND')
+      }
+
+      if (user.status !== 'ACTIVE') {
+        return createErrorResponse('Account is not active', 401, 'ACCOUNT_INACTIVE')
+      }
+
+      const token = generateToken(user as any)
+      await setAuthCookie(token)
+      return createSuccessResponse(user, 'Login successful')
+    }
 
     if (!email || !password) {
       return createErrorResponse('Email and password are required', 400, 'MISSING_CREDENTIALS')
