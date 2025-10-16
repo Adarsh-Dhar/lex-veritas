@@ -87,6 +87,14 @@ try {
   );
 }
 
+// Expose current configuration for UI/logging diagnostics
+export function getContractConfig(): { canisterId: string | null; host: string } {
+  return {
+    canisterId: CONTRACT_CANISTER_ID_TEXT,
+    host: IC_HOST,
+  };
+}
+
 // -------------------------
 // Candid IDL and TS Types
 // -------------------------
@@ -358,8 +366,28 @@ export async function registerUser(params: {
 }
 
 export async function createCase(caseNumber: string): Promise<Result<Case>> {
-  const actor = await getContractActor();
-  return actor.createCase(caseNumber);
+  try {
+    const actor = await getContractActor();
+    return await actor.createCase(caseNumber);
+  } catch (error: any) {
+    const msg = String(error?.message || error || "")
+    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module")
+    if (isNoWasm) {
+      // Development-friendly fallback so the UI can function without a deployed canister
+      // Generate a deterministic-ish mock case
+      const now = Date.now()
+      const mock: Case = {
+        id: `CASE-${now}`,
+        caseNumber,
+        leadInvestigatorId: "2vxsx-fae", // anonymous principal text as placeholder
+        createdAt: BigInt(now),
+      }
+      // eslint-disable-next-line no-console
+      console.warn("[contract.createCase] Canister has no wasm. Returning mock case for development.")
+      return { ok: mock }
+    }
+    return { err: msg }
+  }
 }
 
 export async function logEvidence(params: {

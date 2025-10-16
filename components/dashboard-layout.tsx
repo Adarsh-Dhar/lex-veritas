@@ -6,7 +6,8 @@ import Header from "@/components/header"
 import Sidebar from "@/components/sidebar"
 import IntakeForm from "@/components/intake-form"
 import EvidenceLifecycleDashboard from "@/components/evidence-lifecycle-dashboard"
-type ViewType = "intake" | "lifecycle"
+import CasesManager from "@/components/cases-manager"
+type ViewType = "intake" | "lifecycle" | "cases" | "create-case"
 
 export default function DashboardLayout() {
   const { user } = useAuth()
@@ -18,6 +19,10 @@ export default function DashboardLayout() {
         return <IntakeForm onSubmit={() => setCurrentView("lifecycle")} />
       case "lifecycle":
         return <EvidenceLifecycleDashboard />
+      case "cases":
+        return <CasesManager />
+      case "create-case":
+        return <CasesManager />
       default:
         return <EvidenceLifecycleDashboard />
     }

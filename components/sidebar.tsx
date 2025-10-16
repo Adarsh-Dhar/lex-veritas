@@ -42,7 +42,27 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
           </Button>
         )}
 
-        {/* Cases/Admin removed in on-chain only UI */}
+        {hasPermission("view_case") && (
+          <>
+            <Button
+              variant={currentView === "create-case" ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => onViewChange("create-case")}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Case
+            </Button>
+
+            <Button
+              variant={currentView === "cases" ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => onViewChange("cases")}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Cases
+            </Button>
+          </>
+        )}
       </nav>
 
       <div className="p-4 border-t border-border">
