@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { CheckCircle2 } from "lucide-react"
+import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 
 interface EvidenceItem {
   id: string
@@ -29,18 +29,49 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
   const [selectedEvidence, setSelectedEvidence] = useState("")
   const [receivingParty, setReceivingParty] = useState("")
   const [notes, setNotes] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (selectedEvidence && receivingParty) {
+    if (!selectedEvidence || !receivingParty) return
+
+    setIsLoading(true)
+    setError("")
+
+    try {
+      const response = await fetch(`/api/evidence/${selectedEvidence}/custody-logs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'TRANSFER',
+          notes: notes || `Transferred to ${receivingParty}`,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to record custody transfer')
+      }
+
       setSubmitted(true)
+      setSelectedEvidence("")
+      setReceivingParty("")
+      setNotes("")
+      
+      // Reset success message after 3 seconds
       setTimeout(() => {
-        setSelectedEvidence("")
-        setReceivingParty("")
-        setNotes("")
         setSubmitted(false)
       }, 3000)
+    } catch (err) {
+      console.error('Transfer custody error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to record custody transfer')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -52,10 +83,19 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
       </CardHeader>
       <CardContent>
         {submitted && (
-          <Alert className="mb-6 bg-accent/10 border-accent/30">
-            <CheckCircle2 className="h-4 w-4 text-accent" />
-            <AlertDescription className="text-accent">
+          <Alert className="mb-6 bg-green-50 border-green-200">
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-green-800">
               Custody transfer recorded successfully and added to the immutable chain
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {error && (
+          <Alert className="mb-6 bg-red-50 border-red-200">
+            <AlertCircle className="h-4 w-4 text-red-600" />
+            <AlertDescription className="text-red-800">
+              {error}
             </AlertDescription>
           </Alert>
         )}
@@ -103,8 +143,19 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
             />
           </div>
 
-          <Button type="submit" className="w-full" disabled={!selectedEvidence || !receivingParty}>
-            Record Custody Transfer
+          <Button 
+            type="submit" 
+            className="w-full" 
+            disabled={!selectedEvidence || !receivingParty || isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Recording Transfer...
+              </>
+            ) : (
+              'Record Custody Transfer'
+            )}
           </Button>
         </form>
       </CardContent>
