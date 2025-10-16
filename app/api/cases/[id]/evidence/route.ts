@@ -2,16 +2,17 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     // Verify case exists
     const caseData = await prisma.case.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!caseData) {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     }
 
     const evidenceItems = await prisma.evidenceItem.findMany({
-      where: { caseId: params.id },
+      where: { caseId: id },
       include: {
         collectedBy: {
           select: {

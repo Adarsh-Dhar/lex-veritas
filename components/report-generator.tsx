@@ -7,18 +7,79 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Download, Eye, CheckCircle2 } from "lucide-react"
 import { generatePDFContent, downloadReport, type EvidenceData } from "@/lib/pdf-generator"
 
+interface EvidenceItem {
+  id: string
+  itemNumber: string
+  evidenceType: string
+  description: string
+  collectedAt: string
+  location: string
+  initialHash: string
+  storyProtocolIpId: string
+  icpCanisterId: string
+  case: {
+    id: string
+    caseNumber: string
+  }
+  collectedBy: {
+    id: string
+    name: string
+    badgeNumber: string
+  }
+  custodyLogs: {
+    id: string
+    action: string
+    timestamp: string
+    notes: string | null
+    fromUser: {
+      name: string
+      badgeNumber: string
+    }
+    toUser: {
+      name: string
+      badgeNumber: string
+    } | null
+  }[]
+}
+
 interface ReportGeneratorProps {
-  evidence: EvidenceData
+  evidence: EvidenceItem
   onClose: () => void
+}
+
+// Convert API evidence data to PDF generator format
+const convertToPDFFormat = (evidence: EvidenceItem): EvidenceData => {
+  return {
+    caseNumber: evidence.case.caseNumber,
+    itemNumber: evidence.itemNumber,
+    description: evidence.description,
+    type: evidence.evidenceType,
+    recordedBy: evidence.collectedBy.name,
+    recordedDate: new Date(evidence.collectedAt).toLocaleString(),
+    hash: evidence.initialHash,
+    ipaRecord: evidence.storyProtocolIpId,
+    canisterId: evidence.icpCanisterId,
+    chainOfCustody: evidence.custodyLogs.map(log => ({
+      action: log.action,
+      actor: log.toUser 
+        ? `${log.fromUser.name} → ${log.toUser.name}` 
+        : log.fromUser.name,
+      timestamp: new Date(log.timestamp).toLocaleString(),
+      details: log.notes || 'No additional details',
+      status: 'completed'
+    }))
+  }
 }
 
 export default function ReportGenerator({ evidence, onClose }: ReportGeneratorProps) {
   const [reportGenerated, setReportGenerated] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
 
+  const pdfData = convertToPDFFormat(evidence)
+
   const handleGenerateReport = () => {
-    const content = generatePDFContent(evidence)
-    downloadReport(content, evidence.caseNumber, evidence.itemNumber)
+    const content = generatePDFContent(pdfData)
+    downloadReport(content, evidence.case.caseNumber, evidence.itemNumber)
     setReportGenerated(true)
   }
 
@@ -26,7 +87,7 @@ export default function ReportGenerator({ evidence, onClose }: ReportGeneratorPr
     setPreviewOpen(!previewOpen)
   }
 
-  const reportContent = generatePDFContent(evidence)
+  const reportContent = generatePDFContent(pdfData)
 
   return (
     <Card className="border-border">
@@ -35,7 +96,7 @@ export default function ReportGenerator({ evidence, onClose }: ReportGeneratorPr
           <div>
             <CardTitle>Generate Chain of Custody Report</CardTitle>
             <CardDescription>
-              Create a court-admissible PDF report for {evidence.caseNumber} - Item #{evidence.itemNumber}
+              Create a court-admissible PDF report for {evidence.case.caseNumber} - Item #{evidence.itemNumber}
             </CardDescription>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -58,7 +119,7 @@ export default function ReportGenerator({ evidence, onClose }: ReportGeneratorPr
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Case Number</p>
-              <p className="font-medium text-foreground">{evidence.caseNumber}</p>
+              <p className="font-medium text-foreground">{evidence.case.caseNumber}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Item Number</p>
@@ -66,11 +127,11 @@ export default function ReportGenerator({ evidence, onClose }: ReportGeneratorPr
             </div>
             <div>
               <p className="text-muted-foreground">Evidence Type</p>
-              <p className="font-medium text-foreground">{evidence.type}</p>
+              <p className="font-medium text-foreground">{evidence.evidenceType}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Chain Entries</p>
-              <p className="font-medium text-foreground">{evidence.chainOfCustody.length}</p>
+              <p className="font-medium text-foreground">{evidence.custodyLogs.length}</p>
             </div>
           </div>
         </div>

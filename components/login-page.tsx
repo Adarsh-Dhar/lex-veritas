@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, Lock } from "lucide-react"
+import Link from "next/link"
 
 export default function LoginPage() {
   const { login, isLoading } = useAuth()
@@ -74,13 +75,15 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-6 p-4 bg-muted/50 rounded-lg text-sm text-muted-foreground space-y-1">
-            <p className="font-semibold">Demo Credentials:</p>
-            <p>Analyst: analyst@lexveritas.gov</p>
-            <p>Prosecutor: prosecutor@lexveritas.gov</p>
-            <p>Admin: admin@lexveritas.gov</p>
-            <p>Password: demo123</p>
+          <div className="mt-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Don't have an account?{" "}
+              <Link href="/signup" className="text-primary hover:underline">
+                Create one
+              </Link>
+            </p>
           </div>
+
         </CardContent>
       </Card>
     </div>

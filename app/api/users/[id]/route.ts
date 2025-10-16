@@ -2,15 +2,16 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, authorize, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     const targetUser = await prisma.user.findUnique({
-      where: { id: params.id },
+      where: { id },
       select: {
         id: true,
         name: true,
@@ -34,16 +35,17 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     // Check if user can update (admin or own profile)
     const isAdmin = authorize(user, 'manage_users')
-    const isOwnProfile = user.id === params.id
+    const isOwnProfile = user.id === id
 
     if (!isAdmin && !isOwnProfile) {
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
@@ -54,7 +56,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingUser) {
@@ -76,7 +78,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (email || badgeNumber) {
       const conflictUser = await prisma.user.findFirst({
         where: {
-          id: { not: params.id },
+          id: { not: id },
           OR: [
             ...(email ? [{ email }] : []),
             ...(badgeNumber ? [{ badgeNumber }] : []),
@@ -90,7 +92,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     const updatedUser = await prisma.user.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
       select: {
         id: true,
@@ -111,7 +113,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -122,9 +124,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingUser) {
@@ -133,7 +136,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     // Soft delete (set status to INACTIVE)
     await prisma.user.update({
-      where: { id: params.id },
+      where: { id },
       data: { status: 'INACTIVE' },
     })
 

@@ -2,15 +2,16 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     const custodyLog = await prisma.custodyLog.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         evidenceItem: {
           select: {

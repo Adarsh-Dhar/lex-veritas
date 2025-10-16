@@ -2,29 +2,75 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calendar, MapPin } from "lucide-react"
+import { Calendar, MapPin, Loader2 } from "lucide-react"
 import FileUploadArea from "./file-upload-area"
+import { useAuth } from "@/lib/auth-context"
 
 interface IntakeFormProps {
   onSubmit: (data: any) => void
 }
 
+interface Case {
+  id: string
+  caseNumber: string
+  leadInvestigator: {
+    id: string
+    name: string
+    badgeNumber: string
+  }
+}
+
 export default function IntakeForm({ onSubmit }: IntakeFormProps) {
+  const { user } = useAuth()
   const [formData, setFormData] = useState({
-    caseNumber: "",
-    leadInvestigator: "Jane Doe",
-    evidenceItem: "",
+    caseId: "",
+    itemNumber: "",
     evidenceType: "",
     description: "",
+    location: "",
+    reasonForCollection: "",
+    handlingNotes: "",
   })
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [cases, setCases] = useState<Case[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingCases, setIsLoadingCases] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchCases()
+  }, [])
+
+  const fetchCases = async () => {
+    try {
+      setIsLoadingCases(true)
+      const response = await fetch('/api/cases', {
+        method: 'GET',
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch cases')
+      }
+
+      const data = await response.json()
+      if (data.success) {
+        setCases(data.data.cases || [])
+      }
+    } catch (err) {
+      console.error('Error fetching cases:', err)
+      setError('Failed to load cases')
+    } finally {
+      setIsLoadingCases(false)
+    }
+  }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -39,29 +85,71 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
     setUploadedFile(file)
   }
 
-  const handleSubmit = () => {
-    if (!uploadedFile) return
+  const handleSubmit = async () => {
+    if (!uploadedFile || !user) return
 
-    const timestamp = new Date().toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      timeZone: "UTC",
-    })
+    setIsLoading(true)
+    setError(null)
 
-    onSubmit({
-      ...formData,
-      fileName: uploadedFile.name,
-      fileSize: (uploadedFile.size / 1024 / 1024).toFixed(2),
-      timestamp,
-      location: "37.7749° N, 122.4194° W",
-      hash: "0a4f...c3e1",
-      ipaRecord: "0x1234...abcd",
-      canisterId: "canister-id-xyz...",
-    })
+    try {
+      // Convert file to base64
+      const fileBuffer = await uploadedFile.arrayBuffer()
+      const base64Data = Buffer.from(fileBuffer).toString('base64')
+
+      const evidenceData = {
+        caseId: formData.caseId,
+        itemNumber: formData.itemNumber,
+        evidenceType: formData.evidenceType,
+        description: formData.description,
+        collectedAt: new Date().toISOString(),
+        location: formData.location,
+        reasonForCollection: formData.reasonForCollection,
+        handlingNotes: formData.handlingNotes,
+        fileData: base64Data,
+        collectedById: user.id,
+      }
+
+      const response = await fetch('/api/evidence', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(evidenceData),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create evidence item')
+      }
+
+      if (data.success) {
+        onSubmit({
+          ...formData,
+          fileName: uploadedFile.name,
+          fileSize: (uploadedFile.size / 1024 / 1024).toFixed(2),
+          timestamp: new Date().toLocaleString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            timeZone: "UTC",
+          }),
+          location: formData.location,
+          hash: data.data.initialHash,
+          ipaRecord: data.data.storyProtocolIpId,
+          canisterId: data.data.icpCanisterId,
+        })
+      }
+    } catch (err) {
+      console.error('Error creating evidence item:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create evidence item')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -72,32 +160,33 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-2">Case Number</label>
-            <Input
-              name="caseNumber"
-              placeholder="e.g., SF-2025-0087"
-              value={formData.caseNumber}
-              onChange={handleInputChange}
-              className="bg-input border-border text-foreground placeholder:text-muted-foreground"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-2">Lead Investigator</label>
-            <Input
-              name="leadInvestigator"
-              value={formData.leadInvestigator}
-              onChange={handleInputChange}
-              className="bg-input border-border text-foreground placeholder:text-muted-foreground"
-            />
+            <label className="block text-sm font-medium text-foreground mb-2">Case</label>
+            <Select value={formData.caseId} onValueChange={(value) => setFormData(prev => ({ ...prev, caseId: value }))}>
+              <SelectTrigger className="bg-input border-border text-foreground">
+                <SelectValue placeholder={isLoadingCases ? "Loading cases..." : "Select a case"} />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {isLoadingCases ? (
+                  <SelectItem value="" disabled>Loading cases...</SelectItem>
+                ) : Array.isArray(cases) && cases.length > 0 ? (
+                  cases.map((caseItem) => (
+                    <SelectItem key={caseItem.id} value={caseItem.id}>
+                      {caseItem.caseNumber} - {caseItem.leadInvestigator.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="" disabled>No cases available</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">Evidence Item #</label>
             <Input
-              name="evidenceItem"
+              name="itemNumber"
               placeholder="e.g., 001"
-              value={formData.evidenceItem}
+              value={formData.itemNumber}
               onChange={handleInputChange}
               className="bg-input border-border text-foreground placeholder:text-muted-foreground"
             />
@@ -110,10 +199,12 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
                 <SelectValue placeholder="Select evidence type" />
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
-                <SelectItem value="laptop">Laptop Hard Drive</SelectItem>
-                <SelectItem value="phone">Mobile Phone</SelectItem>
-                <SelectItem value="usb">USB Drive</SelectItem>
-                <SelectItem value="footage">Surveillance Footage</SelectItem>
+                <SelectItem value="LAPTOP_HARD_DRIVE">Laptop Hard Drive</SelectItem>
+                <SelectItem value="MOBILE_PHONE">Mobile Phone</SelectItem>
+                <SelectItem value="USB_DRIVE">USB Drive</SelectItem>
+                <SelectItem value="SURVEILLANCE_FOOTAGE">Surveillance Footage</SelectItem>
+                <SelectItem value="DOCUMENT">Document</SelectItem>
+                <SelectItem value="OTHER">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -126,6 +217,39 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
               value={formData.description}
               onChange={handleInputChange}
               className="bg-input border-border text-foreground placeholder:text-muted-foreground min-h-24"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Location</label>
+            <Input
+              name="location"
+              placeholder="e.g., 37.7749° N, 122.4194° W"
+              value={formData.location}
+              onChange={handleInputChange}
+              className="bg-input border-border text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Reason for Collection</label>
+            <Textarea
+              name="reasonForCollection"
+              placeholder="e.g., Digital forensics investigation"
+              value={formData.reasonForCollection}
+              onChange={handleInputChange}
+              className="bg-input border-border text-foreground placeholder:text-muted-foreground min-h-20"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">Handling Notes</label>
+            <Textarea
+              name="handlingNotes"
+              placeholder="e.g., Handled with proper chain of custody"
+              value={formData.handlingNotes}
+              onChange={handleInputChange}
+              className="bg-input border-border text-foreground placeholder:text-muted-foreground min-h-20"
             />
           </div>
 
@@ -151,12 +275,25 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
         <FileUploadArea onFileUpload={handleFileUpload} />
 
+        {error && (
+          <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
+
         <Button
           onClick={handleSubmit}
-          disabled={!uploadedFile}
+          disabled={!uploadedFile || !formData.caseId || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading}
           className="mt-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-6 text-base"
         >
-          Calculate Hash & Record Evidence
+          {isLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Processing...
+            </>
+          ) : (
+            "Calculate Hash & Record Evidence"
+          )}
         </Button>
       </Card>
     </div>

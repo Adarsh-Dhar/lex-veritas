@@ -2,15 +2,16 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, authorize, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     const caseData = await prisma.case.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         leadInvestigator: {
           select: {
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -71,12 +72,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     const body = await request.json()
     const { caseNumber, leadInvestigatorId } = body
 
     // Check if case exists
     const existingCase = await prisma.case.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingCase) {
@@ -91,7 +93,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (caseNumber) {
       const conflictCase = await prisma.case.findFirst({
         where: {
-          id: { not: params.id },
+          id: { not: id },
           caseNumber,
         },
       })
@@ -113,7 +115,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     const updatedCase = await prisma.case.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
       include: {
         leadInvestigator: {
@@ -138,7 +140,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -149,9 +151,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     // Check if case exists
     const existingCase = await prisma.case.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingCase) {
@@ -160,7 +163,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     // Delete case (this will cascade to evidence items and custody logs)
     await prisma.case.delete({
-      where: { id: params.id },
+      where: { id },
     })
 
     return createSuccessResponse(null, 'Case deleted successfully')

@@ -2,15 +2,16 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, authorize, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     const evidenceItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         case: {
           select: {
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -69,6 +70,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     const body = await request.json()
     const {
       itemNumber,
@@ -81,7 +83,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     // Check if evidence item exists
     const existingItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingItem) {
@@ -100,7 +102,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (itemNumber && itemNumber !== existingItem.itemNumber) {
       const conflictItem = await prisma.evidenceItem.findFirst({
         where: {
-          id: { not: params.id },
+          id: { not: id },
           caseId: existingItem.caseId,
           itemNumber,
         },
@@ -112,7 +114,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     const updatedItem = await prisma.evidenceItem.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
       include: {
         case: {
@@ -138,7 +140,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -149,9 +151,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     // Check if evidence item exists
     const existingItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingItem) {
@@ -160,7 +163,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     // Delete evidence item (this will cascade to custody logs)
     await prisma.evidenceItem.delete({
-      where: { id: params.id },
+      where: { id },
     })
 
     return createSuccessResponse(null, 'Evidence item deleted successfully')

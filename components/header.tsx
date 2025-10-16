@@ -7,6 +7,14 @@ import { Button } from "@/components/ui/button"
 export default function Header() {
   const { user, logout } = useAuth()
 
+  const handleLogout = async () => {
+    try {
+      await logout()
+    } catch (error) {
+      console.error('Logout failed:', error)
+    }
+  }
+
   return (
     <header className="border-b border-border bg-card">
       <div className="container mx-auto flex items-center justify-between px-4 py-6">
@@ -19,10 +27,10 @@ export default function Header() {
             <User className="h-5 w-5" />
             <div>
               <p className="font-medium text-foreground">{user?.name}</p>
-              <p className="text-xs">{user?.badge_number || user?.role.replace("_", " ")}</p>
+              <p className="text-xs">{user?.badgeNumber || user?.role}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-foreground">
+          <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground">
             <LogOut className="h-4 w-4" />
           </Button>
         </div>

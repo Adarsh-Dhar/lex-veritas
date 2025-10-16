@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, ArrowRight, FileText } from "lucide-react"
+import { Search, ArrowRight, FileText, RefreshCw } from "lucide-react"
 import ChainOfCustodyView from "./chain-of-custody-view"
 import TransferCustodyForm from "./transfer-custody-form"
 import LogActionForm from "./log-action-form"
@@ -14,76 +14,38 @@ import ReportGenerator from "./report-generator"
 
 interface EvidenceItem {
   id: string
-  caseNumber: string
   itemNumber: string
+  evidenceType: string
   description: string
-  type: string
-  recordedBy: string
-  timestamp: string
-  hash: string
-  ipaRecord: string
-  canisterId?: string
-  chainOfCustody?: {
+  collectedAt: string
+  location: string
+  initialHash: string
+  storyProtocolIpId: string
+  icpCanisterId: string
+  case: {
+    id: string
+    caseNumber: string
+  }
+  collectedBy: {
+    id: string
+    name: string
+    badgeNumber: string
+  }
+  custodyLogs: {
+    id: string
     action: string
-    actor: string
     timestamp: string
-    details: string
-    status: string
+    notes: string | null
+    fromUser: {
+      name: string
+      badgeNumber: string
+    }
+    toUser: {
+      name: string
+      badgeNumber: string
+    } | null
   }[]
 }
-
-// Mock evidence data
-const mockEvidence: EvidenceItem[] = [
-  {
-    id: "1",
-    caseNumber: "SF-2025-0087",
-    itemNumber: "001",
-    description: "Samsung 700z laptop seized from suspect's desk",
-    type: "Laptop Hard Drive",
-    recordedBy: "Detective Sarah Chen",
-    timestamp: "Oct 15, 2025, 10:30:15 AM UTC",
-    hash: "0a4f...c3e1",
-    ipaRecord: "0x1234...abcd",
-    canisterId: "canister-id-xyz...",
-    chainOfCustody: [
-      {
-        action: "Evidence Recorded",
-        actor: "Detective Sarah Chen",
-        timestamp: "Oct 15, 2025, 10:30:15 AM UTC",
-        details: "Initial evidence intake and forensic imaging",
-        status: "completed",
-      },
-      {
-        action: "Transferred to Forensic Lab",
-        actor: "Detective Sarah Chen",
-        timestamp: "Oct 15, 2025, 02:15:42 PM UTC",
-        details: "Transferred custody to Dr. Michael Torres",
-        status: "completed",
-      },
-    ],
-  },
-  {
-    id: "2",
-    caseNumber: "SF-2025-0087",
-    itemNumber: "002",
-    description: "iPhone 14 Pro recovered from scene",
-    type: "Mobile Phone",
-    recordedBy: "Detective Sarah Chen",
-    timestamp: "Oct 15, 2025, 11:45:22 AM UTC",
-    hash: "b5e2...f9d4",
-    ipaRecord: "0x5678...efgh",
-    canisterId: "canister-id-abc...",
-    chainOfCustody: [
-      {
-        action: "Evidence Recorded",
-        actor: "Detective Sarah Chen",
-        timestamp: "Oct 15, 2025, 11:45:22 AM UTC",
-        details: "Initial evidence intake and forensic imaging",
-        status: "completed",
-      },
-    ],
-  },
-]
 
 export default function EvidenceLifecycleDashboard() {
   const { hasPermission } = useAuth()
@@ -91,12 +53,43 @@ export default function EvidenceLifecycleDashboard() {
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null)
   const [activeTab, setActiveTab] = useState("search")
   const [showReportGenerator, setShowReportGenerator] = useState(false)
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const filteredEvidence = mockEvidence.filter(
+  // Fetch evidence items from API
+  const fetchEvidenceItems = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch('/api/evidence')
+      const data = await response.json()
+      
+      if (data.success) {
+        setEvidenceItems(data.data.evidenceItems || [])
+      } else {
+        setError(data.message || 'Failed to fetch evidence items')
+      }
+    } catch (err) {
+      setError('Failed to fetch evidence items')
+      console.error('Error fetching evidence items:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load evidence items on component mount
+  useEffect(() => {
+    fetchEvidenceItems()
+  }, [])
+
+  // Filter evidence items based on search query
+  const filteredEvidence = evidenceItems.filter(
     (item) =>
-      item.caseNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.case.caseNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.itemNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchQuery.toLowerCase()),
+      item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.evidenceType.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   return (
@@ -117,15 +110,29 @@ export default function EvidenceLifecycleDashboard() {
         <TabsContent value="search" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Search Evidence Items</CardTitle>
-              <CardDescription>Find evidence by case number, item number, or description</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Search Evidence Items</CardTitle>
+                  <CardDescription>Find evidence by case number, item number, or description</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchEvidenceItems}
+                  disabled={loading}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by case number (e.g., SF-2025-0087) or item number..."
+                    placeholder="Search by case number, item number, description, or type..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
@@ -133,7 +140,17 @@ export default function EvidenceLifecycleDashboard() {
                 </div>
               </div>
 
-              {filteredEvidence.length > 0 ? (
+              {error && (
+                <div className="text-center py-4 text-destructive bg-destructive/10 rounded-lg">
+                  {error}
+                </div>
+              )}
+
+              {loading ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Loading evidence items...
+                </div>
+              ) : filteredEvidence.length > 0 ? (
                 <div className="space-y-3">
                   {filteredEvidence.map((item) => (
                     <Card
@@ -144,15 +161,16 @@ export default function EvidenceLifecycleDashboard() {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
-                            <span className="font-semibold text-foreground">{item.caseNumber}</span>
+                            <span className="font-semibold text-foreground">{item.case.caseNumber}</span>
                             <span className="text-xs bg-primary/20 text-primary px-2 py-1 rounded">
                               Item #{item.itemNumber}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">{item.description}</p>
                           <div className="flex gap-4 text-xs text-muted-foreground">
-                            <span>Type: {item.type}</span>
-                            <span>Recorded: {item.timestamp}</span>
+                            <span>Type: {item.evidenceType}</span>
+                            <span>Collected: {new Date(item.collectedAt).toLocaleString()}</span>
+                            <span>By: {item.collectedBy.name} ({item.collectedBy.badgeNumber})</span>
                           </div>
                         </div>
                         <ArrowRight className="h-5 w-5 text-muted-foreground" />
@@ -193,15 +211,22 @@ export default function EvidenceLifecycleDashboard() {
                 <CardDescription>Create a court-admissible PDF report for any evidence item</CardDescription>
               </CardHeader>
               <CardContent>
-                {filteredEvidence.length > 0 ? (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Loading evidence items...
+                  </div>
+                ) : filteredEvidence.length > 0 ? (
                   <div className="space-y-3">
                     {filteredEvidence.map((item) => (
                       <Card key={item.id} className="p-4 flex items-center justify-between border-border/50">
                         <div>
                           <p className="font-semibold text-foreground">
-                            {item.caseNumber} - Item #{item.itemNumber}
+                            {item.case.caseNumber} - Item #{item.itemNumber}
                           </p>
                           <p className="text-sm text-muted-foreground">{item.description}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Type: {item.evidenceType} | Collected: {new Date(item.collectedAt).toLocaleDateString()}
+                          </p>
                         </div>
                         <Button
                           className="gap-2"
@@ -218,14 +243,14 @@ export default function EvidenceLifecycleDashboard() {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    Search for evidence first to generate a report
+                    {searchQuery ? "No evidence items found" : "Search for evidence first to generate a report"}
                   </div>
                 )}
               </CardContent>
             </Card>
 
             {showReportGenerator && selectedEvidence && (
-              <ReportGenerator evidence={selectedEvidence as any} onClose={() => setShowReportGenerator(false)} />
+              <ReportGenerator evidence={selectedEvidence} onClose={() => setShowReportGenerator(false)} />
             )}
           </TabsContent>
         )}

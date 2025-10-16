@@ -3,31 +3,33 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 
-export type UserRole = "forensic_analyst" | "prosecutor" | "administrator"
+export type UserRole = "ANALYST" | "PROSECUTOR" | "ADMIN" | "AUDITOR"
 
 export interface User {
   id: string
   email: string
   name: string
   role: UserRole
-  badge_number?: string
+  badgeNumber?: string
+  status?: string
 }
 
 interface AuthContextType {
   user: User | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
-  logout: () => void
+  signup: (name: string, email: string, password: string, badgeNumber: string, role?: string) => Promise<void>
+  logout: () => Promise<void>
   hasPermission: (action: string) => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Role-based permissions
+// Role-based permissions matching the backend
 const rolePermissions: Record<UserRole, string[]> = {
-  forensic_analyst: ["log_evidence", "transfer_custody", "log_action", "view_evidence", "view_case"],
-  prosecutor: ["view_evidence", "view_case", "generate_report", "view_chain_of_custody"],
-  administrator: [
+  ANALYST: ["log_evidence", "transfer_custody", "log_action", "view_evidence", "view_case"],
+  PROSECUTOR: ["view_evidence", "view_case", "generate_report", "view_chain_of_custody"],
+  ADMIN: [
     "log_evidence",
     "transfer_custody",
     "log_action",
@@ -38,6 +40,7 @@ const rolePermissions: Record<UserRole, string[]> = {
     "manage_users",
     "manage_permissions",
   ],
+  AUDITOR: ["view_evidence", "view_case", "view_chain_of_custody"],
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -45,69 +48,112 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Check if user is already logged in (from localStorage)
-    const storedUser = localStorage.getItem("lex_veritas_user")
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser))
-      } catch (e) {
-        console.error("Failed to parse stored user")
-      }
-    }
-    setIsLoading(false)
+    // Check if user is already logged in by calling the /api/auth/me endpoint
+    checkAuthStatus()
   }, [])
 
-  const login = async (email: string, password: string) => {
-    // Simulate authentication - in production, this would call a backend API
-    setIsLoading(true)
+  const checkAuthStatus = async () => {
     try {
-      // Mock users for demo
-      const mockUsers: Record<string, User> = {
-        "analyst@lexveritas.gov": {
-          id: "1",
-          email: "analyst@lexveritas.gov",
-          name: "Detective Sarah Chen",
-          role: "forensic_analyst",
-          badge_number: "SF-2847",
-        },
-        "prosecutor@lexveritas.gov": {
-          id: "2",
-          email: "prosecutor@lexveritas.gov",
-          name: "Prosecutor James Mitchell",
-          role: "prosecutor",
-        },
-        "admin@lexveritas.gov": {
-          id: "3",
-          email: "admin@lexveritas.gov",
-          name: "System Administrator",
-          role: "administrator",
-        },
+      const response = await fetch('/api/auth/me', {
+        method: 'GET',
+        credentials: 'include', // Include cookies
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.data) {
+          setUser(data.data)
+        }
       }
-
-      const foundUser = mockUsers[email]
-      if (foundUser && password === "demo123") {
-        setUser(foundUser)
-        localStorage.setItem("lex_veritas_user", JSON.stringify(foundUser))
-      } else {
-        throw new Error("Invalid credentials")
-      }
+    } catch (error) {
+      console.error('Failed to check auth status:', error)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem("lex_veritas_user")
+  const login = async (email: string, password: string) => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies
+        body: JSON.stringify({ email, password }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Login failed')
+      }
+
+      if (data.success && data.data) {
+        setUser(data.data)
+      } else {
+        throw new Error('Invalid response from server')
+      }
+    } catch (error) {
+      console.error('Login error:', error)
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const signup = async (name: string, email: string, password: string, badgeNumber: string, role: string = 'ANALYST') => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies
+        body: JSON.stringify({ name, email, password, badgeNumber, role }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Signup failed')
+      }
+
+      if (data.success && data.data) {
+        setUser(data.data)
+      } else {
+        throw new Error('Invalid response from server')
+      }
+    } catch (error) {
+      console.error('Signup error:', error)
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include', // Include cookies
+      })
+    } catch (error) {
+      console.error('Logout error:', error)
+    } finally {
+      setUser(null)
+    }
   }
 
   const hasPermission = (action: string): boolean => {
     if (!user) return false
-    return rolePermissions[user.role].includes(action)
+    return rolePermissions[user.role]?.includes(action) ?? false
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, isLoading, login, signup, logout, hasPermission }}>{children}</AuthContext.Provider>
   )
 }
 

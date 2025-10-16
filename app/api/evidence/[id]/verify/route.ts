@@ -3,13 +3,14 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 import crypto from 'crypto'
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     const { fileData } = await request.json()
 
     if (!fileData) {
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Get evidence item
     const evidenceItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
       select: {
         id: true,
         initialHash: true,

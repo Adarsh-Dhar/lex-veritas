@@ -3,16 +3,17 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, authorize, createErrorResponse, createSuccessResponse } from '@/lib/auth'
 import crypto from 'crypto'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
       return createErrorResponse('Not authenticated', 401, 'UNAUTHENTICATED')
     }
 
+    const { id } = await params
     // Verify evidence item exists
     const evidenceItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!evidenceItem) {
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     }
 
     const custodyLogs = await prisma.custodyLog.findMany({
-      where: { evidenceItemId: params.id },
+      where: { evidenceItemId: id },
       include: {
         fromUser: {
           select: {
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request)
     if (!user) {
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return createErrorResponse('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS')
     }
 
+    const { id } = await params
     const { action, toUserId, notes } = await request.json()
 
     if (!action) {
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Verify evidence item exists
     const evidenceItem = await prisma.evidenceItem.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!evidenceItem) {
@@ -86,12 +88,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Generate placeholder blockchain transaction ID
     const timestamp = new Date().toISOString()
-    const transactionId = `tx_${crypto.createHash('sha256').update(`${params.id}_${action}_${timestamp}`).digest('hex').substring(0, 16)}`
+    const transactionId = `tx_${crypto.createHash('sha256').update(`${id}_${action}_${timestamp}`).digest('hex').substring(0, 16)}`
 
     // Create custody log
     const custodyLog = await prisma.custodyLog.create({
       data: {
-        evidenceItemId: params.id,
+        evidenceItemId: id,
         action: action as any,
         timestamp: new Date(),
         fromUserId: user.id,

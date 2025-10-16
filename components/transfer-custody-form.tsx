@@ -12,9 +12,13 @@ import { CheckCircle2 } from "lucide-react"
 
 interface EvidenceItem {
   id: string
-  caseNumber: string
   itemNumber: string
+  evidenceType: string
   description: string
+  case: {
+    id: string
+    caseNumber: string
+  }
 }
 
 interface TransferCustodyFormProps {
@@ -66,7 +70,7 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
               <SelectContent>
                 {evidence.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
-                    {item.caseNumber} - Item #{item.itemNumber}: {item.description}
+                    {item.case.caseNumber} - Item #{item.itemNumber}: {item.description}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -80,10 +84,11 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
                 <SelectValue placeholder="Select receiving party" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="prosecutor_james">Prosecutor James Mitchell</SelectItem>
-                <SelectItem value="analyst_michael">Dr. Michael Torres (Forensic Lab)</SelectItem>
+                <SelectItem value="prosecutor">Prosecutor</SelectItem>
+                <SelectItem value="forensic_lab">Forensic Lab</SelectItem>
                 <SelectItem value="evidence_room">Evidence Room Storage</SelectItem>
                 <SelectItem value="court">Court Clerk</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>

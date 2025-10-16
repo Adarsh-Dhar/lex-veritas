@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, Plus, Edit2, Trash2, Shield } from "lucide-react"
+import { Search, Plus, Edit2, Trash2, Shield, Loader2 } from "lucide-react"
 import UserManagementForm from "./user-management-form"
 import PermissionManager from "./permission-manager"
 import SystemAuditLog from "./system-audit-log"
@@ -15,76 +15,67 @@ interface User {
   id: string
   name: string
   email: string
-  role: "forensic_analyst" | "prosecutor" | "administrator"
-  badge_number?: string
-  status: "active" | "inactive" | "suspended"
-  lastLogin: string
-  createdDate: string
+  role: "ANALYST" | "PROSECUTOR" | "ADMIN" | "AUDITOR"
+  badgeNumber?: string
+  status: "ACTIVE" | "INACTIVE" | "SUSPENDED"
+  createdAt: string
+  updatedAt: string
 }
-
-// Mock user data
-const mockUsers: User[] = [
-  {
-    id: "1",
-    name: "Detective Sarah Chen",
-    email: "analyst@lexveritas.gov",
-    role: "forensic_analyst",
-    badge_number: "SF-2847",
-    status: "active",
-    lastLogin: "Oct 17, 2025, 02:30 PM",
-    createdDate: "Sep 15, 2025",
-  },
-  {
-    id: "2",
-    name: "Prosecutor James Mitchell",
-    email: "prosecutor@lexveritas.gov",
-    role: "prosecutor",
-    status: "active",
-    lastLogin: "Oct 16, 2025, 10:15 AM",
-    createdDate: "Sep 10, 2025",
-  },
-  {
-    id: "3",
-    name: "System Administrator",
-    email: "admin@lexveritas.gov",
-    role: "administrator",
-    status: "active",
-    lastLogin: "Oct 17, 2025, 09:00 AM",
-    createdDate: "Aug 01, 2025",
-  },
-  {
-    id: "4",
-    name: "Dr. Michael Torres",
-    email: "torres@lexveritas.gov",
-    role: "forensic_analyst",
-    badge_number: "SF-2901",
-    status: "active",
-    lastLogin: "Oct 15, 2025, 04:45 PM",
-    createdDate: "Sep 20, 2025",
-  },
-]
 
 export default function AdminDashboard() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [users, setUsers] = useState<User[]>(mockUsers)
+  const [users, setUsers] = useState<User[]>([])
   const [activeTab, setActiveTab] = useState("users")
   const [showAddUserForm, setShowAddUserForm] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchUsers()
+  }, [])
+
+  const fetchUsers = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const response = await fetch('/api/users', {
+        method: 'GET',
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch users')
+      }
+
+      const data = await response.json()
+      if (data.success) {
+        setUsers(data.data)
+      } else {
+        throw new Error(data.error || 'Failed to fetch users')
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch users')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const filteredUsers = users.filter(
     (user) =>
       user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.badge_number?.toLowerCase().includes(searchQuery.toLowerCase()),
+      user.badgeNumber?.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "active":
+      case "ACTIVE":
         return "bg-accent/20 text-accent border-accent/30"
-      case "inactive":
+      case "INACTIVE":
         return "bg-muted/20 text-muted-foreground border-muted/30"
-      case "suspended":
+      case "SUSPENDED":
         return "bg-destructive/20 text-destructive border-destructive/30"
       default:
         return ""
@@ -93,19 +84,44 @@ export default function AdminDashboard() {
 
   const getRoleColor = (role: string) => {
     switch (role) {
-      case "forensic_analyst":
+      case "ANALYST":
         return "bg-primary/20 text-primary border-primary/30"
-      case "prosecutor":
+      case "PROSECUTOR":
         return "bg-secondary/20 text-secondary border-secondary/30"
-      case "administrator":
+      case "ADMIN":
         return "bg-accent/20 text-accent border-accent/30"
+      case "AUDITOR":
+        return "bg-muted/20 text-muted-foreground border-muted/30"
       default:
         return ""
     }
   }
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((u) => u.id !== userId))
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/users/${userId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete user')
+      }
+
+      // Refresh the users list
+      await fetchUsers()
+    } catch (err) {
+      console.error('Error deleting user:', err)
+      setError(err instanceof Error ? err.message : 'Failed to delete user')
+    }
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
   }
 
   return (
@@ -147,7 +163,19 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {filteredUsers.length > 0 ? (
+              {isLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                  <p className="text-muted-foreground">Loading users...</p>
+                </div>
+              ) : error ? (
+                <div className="text-center py-8">
+                  <p className="text-destructive mb-4">{error}</p>
+                  <Button onClick={fetchUsers} variant="outline">
+                    Try Again
+                  </Button>
+                </div>
+              ) : filteredUsers.length > 0 ? (
                 <div className="space-y-3">
                   {filteredUsers.map((user) => (
                     <Card key={user.id} className="p-4 border-border/50">
@@ -164,22 +192,22 @@ export default function AdminDashboard() {
                           </div>
 
                           <div className="flex gap-2 mb-3 flex-wrap">
-                            <Badge className={getRoleColor(user.role)}>{user.role.replace("_", " ")}</Badge>
+                            <Badge className={getRoleColor(user.role)}>{user.role}</Badge>
                             <Badge className={getStatusColor(user.status)}>{user.status}</Badge>
                           </div>
 
                           <div className="grid grid-cols-3 gap-4 text-xs text-muted-foreground">
                             <div>
                               <p className="mb-1">Badge Number</p>
-                              <p className="font-medium text-foreground">{user.badge_number || "N/A"}</p>
+                              <p className="font-medium text-foreground">{user.badgeNumber || "N/A"}</p>
                             </div>
                             <div>
-                              <p className="mb-1">Last Login</p>
-                              <p className="font-medium text-foreground">{user.lastLogin}</p>
+                              <p className="mb-1">Last Updated</p>
+                              <p className="font-medium text-foreground">{formatDate(user.updatedAt)}</p>
                             </div>
                             <div>
                               <p className="mb-1">Created</p>
-                              <p className="font-medium text-foreground">{user.createdDate}</p>
+                              <p className="font-medium text-foreground">{formatDate(user.createdAt)}</p>
                             </div>
                           </div>
                         </div>

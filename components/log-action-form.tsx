@@ -12,9 +12,13 @@ import { CheckCircle2 } from "lucide-react"
 
 interface EvidenceItem {
   id: string
-  caseNumber: string
   itemNumber: string
+  evidenceType: string
   description: string
+  case: {
+    id: string
+    caseNumber: string
+  }
 }
 
 interface LogActionFormProps {
@@ -66,7 +70,7 @@ export default function LogActionForm({ evidence }: LogActionFormProps) {
               <SelectContent>
                 {evidence.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
-                    {item.caseNumber} - Item #{item.itemNumber}: {item.description}
+                    {item.case.caseNumber} - Item #{item.itemNumber}: {item.description}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -80,12 +84,12 @@ export default function LogActionForm({ evidence }: LogActionFormProps) {
                 <SelectValue placeholder="Select action type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="analysis_started">Analysis Started</SelectItem>
-                <SelectItem value="working_copy">Working Copy Created</SelectItem>
-                <SelectItem value="analysis_complete">Analysis Complete</SelectItem>
-                <SelectItem value="court_presentation">Presented in Court</SelectItem>
-                <SelectItem value="storage">Moved to Storage</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="ANALYSIS">Analysis</SelectItem>
+                <SelectItem value="TRANSFER">Transfer</SelectItem>
+                <SelectItem value="STORAGE">Storage</SelectItem>
+                <SelectItem value="COURT">Court Presentation</SelectItem>
+                <SelectItem value="DESTRUCTION">Destruction</SelectItem>
+                <SelectItem value="OTHER">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>
