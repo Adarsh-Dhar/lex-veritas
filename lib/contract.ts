@@ -3,14 +3,24 @@ import { IDL } from "@dfinity/candid";
 import { Principal } from "@dfinity/principal";
 
 // Environment configuration
-const RAW_CONTRACT_CANISTER_ID = process.env.NEXT_PUBLIC_CONTRACT_BACKEND_CANISTER_ID;
-const IC_HOST = process.env.NEXT_PUBLIC_IC_HOST ?? "https://icp0.io";
+const RAW_CONTRACT_CANISTER_ID =
+  process.env.NEXT_PUBLIC_CONTRACT_BACKEND_CANISTER_ID ||
+  process.env.NEXT_PUBLIC_CONTRACT_CANISTER_ID ||
+  // dfx-generated var (server-side only); included as a last resort for dev
+  (process.env as any).CANISTER_ID_contract_backend;
+
+const IC_HOST = (() => {
+  // Default to local replica in development to avoid accidental mainnet calls
+  const explicit = process.env.NEXT_PUBLIC_IC_HOST;
+  const resolved = explicit || (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:4943" : "https://icp0.io");
+  // Normalize 127.0.0.1 to localhost to align with II and avoid signature edge-cases
+  return resolved.replace("127.0.0.1", "localhost");
+})();
 
 if (!RAW_CONTRACT_CANISTER_ID) {
-  // Fail fast so consumers know env is missing
   // eslint-disable-next-line no-console
   console.warn(
-    "Missing NEXT_PUBLIC_CONTRACT_BACKEND_CANISTER_ID. Set it in your environment to enable canister calls."
+    "Missing contract canister id. Set NEXT_PUBLIC_CONTRACT_BACKEND_CANISTER_ID (or NEXT_PUBLIC_CONTRACT_CANISTER_ID) in your environment."
   );
 }
 
@@ -264,11 +274,13 @@ let cachedIdentityActor: WeakMap<object, ContractService> | null = null;
 export async function getContractActor(): Promise<ContractService> {
   if (cachedActor) return cachedActor;
   if (!CONTRACT_CANISTER_ID_PRINCIPAL) throw new Error("Canister ID not configured or invalid");
-
-  const agent = new HttpAgent({ host: IC_HOST });
-  // In local development fetch the replica root key to enable cert verification
-  if (IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost")) {
-    await agent.fetchRootKey();
+  const isDev = process.env.NODE_ENV !== "production";
+  const agent = new HttpAgent({ host: IC_HOST, ...(isDev ? { verifyQuerySignatures: false as any } : {}) });
+  // In development fetch the replica root key to enable cert verification and
+  // disable query signature verification which local replica may not provide
+  if (isDev) {
+    try { await agent.fetchRootKey(); } catch {}
+    try { (agent as any).setVerifyQuerySignatures?.(false); } catch {}
   }
 
   const actor = Actor.createActor<ContractService>(idlFactory, {
@@ -290,10 +302,13 @@ export async function createAuthenticatedContractActor(identity: unknown): Promi
   const existing = cachedIdentityActor.get(identity as object);
   if (existing) return existing;
 
-  const agent = new HttpAgent({ host: IC_HOST, identity: identity as any });
-  // In local development fetch the replica root key to enable cert verification
-  if (IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost")) {
-    await agent.fetchRootKey();
+  const isDev = process.env.NODE_ENV !== "production";
+  const agent = new HttpAgent({ host: IC_HOST, identity: identity as any, ...(isDev ? { verifyQuerySignatures: false as any } : {}) });
+  // In development fetch the replica root key to enable cert verification and
+  // disable query signature verification which local replica may not provide
+  if (isDev) {
+    try { await agent.fetchRootKey(); } catch {}
+    try { (agent as any).setVerifyQuerySignatures?.(false); } catch {}
   }
 
   const actor = Actor.createActor<ContractService>(idlFactory, {

@@ -1,115 +1,147 @@
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
-import { prisma } from './prisma'
-import { hasPermission, type UserRole } from './permissions'
+import { Principal } from '@dfinity/principal'
+import { getMyProfile } from '@/lib/contract'
 
-const JWT_SECRET = process.env.JWT_SECRET!
-const COOKIE_NAME = 'lex-veritas-token'
+const II_COOKIE_NAME = 'ii_principal'
 
-export interface AuthUser {
-  id: string
-  email: string
-  name: string
-  role: UserRole
-  badgeNumber: string
-  status: string
+export async function setIiCookie(principalText: string): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.set(II_COOKIE_NAME, principalText, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60,
+    path: '/',
+  })
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 10)
+export async function clearIiCookie(): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.delete(II_COOKIE_NAME)
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash)
-}
-
-export function generateToken(user: AuthUser): string {
-  return jwt.sign(
-    {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  )
-}
-
-export function verifyToken(token: string): { id: string; email: string; role: UserRole } | null {
+export function getCurrentPrincipal(request: NextRequest): string | null {
+  const principalText = request.cookies.get(II_COOKIE_NAME)?.value
+  if (!principalText) return null
   try {
-    return jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: UserRole }
+    Principal.fromText(principalText)
+    return principalText
   } catch {
     return null
   }
 }
 
-export async function authenticate(request: NextRequest): Promise<AuthUser | null> {
-  const token = request.cookies.get(COOKIE_NAME)?.value
-
-  if (!token) {
-    return null
-  }
-
-  const payload = verifyToken(token)
-  if (!payload) {
-    return null
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: payload.id },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      badgeNumber: true,
-      status: true,
-    },
-  })
-
-  if (!user || user.status !== 'ACTIVE') {
-    return null
-  }
-
-  return user as AuthUser
-}
-
-export function authorize(user: AuthUser, action: string): boolean {
-  return hasPermission(user.role, action)
-}
-
-export async function setAuthCookie(token: string): Promise<void> {
-  const cookieStore = await cookies()
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
-  })
-}
-
-export async function clearAuthCookie(): Promise<void> {
-  const cookieStore = await cookies()
-  cookieStore.delete(COOKIE_NAME)
-}
-
 export function createErrorResponse(message: string, status: number = 400, code?: string) {
-  return Response.json(
-    {
-      error: message,
-      code: code || 'ERROR',
-      success: false,
-    },
-    { status }
-  )
+  const payload = makeJsonSafe({
+    error: message,
+    code: code || 'ERROR',
+    success: false,
+  })
+  return Response.json(payload, { status })
 }
 
 export function createSuccessResponse(data: any, message?: string) {
-  return Response.json({
+  const payload = makeJsonSafe({
     success: true,
     data,
     message,
   })
+  return Response.json(payload)
+}
+
+// Convert BigInt and Principal-like values to JSON-safe primitives
+function makeJsonSafe(input: any): any {
+  if (input === null || input === undefined) return input
+  const t = typeof input
+  if (t === 'bigint') return input.toString()
+  if (t !== 'object') return input
+
+  // Principal from @dfinity/principal
+  if (typeof (input as any).toText === 'function' && (input as any).constructor?.name === 'Principal') {
+    try {
+      return (input as any).toText()
+    } catch {
+      // fall through
+    }
+  }
+
+  if (Array.isArray(input)) {
+    return input.map((v) => makeJsonSafe(v))
+  }
+
+  const output: Record<string, any> = {}
+  for (const [k, v] of Object.entries(input)) {
+    // Also coerce nested Principals that appear as values
+    if (v && typeof (v as any).toText === 'function' && (v as any).constructor?.name === 'Principal') {
+      try {
+        output[k] = (v as any).toText()
+        continue
+      } catch {
+        // ignore
+      }
+    }
+    output[k] = makeJsonSafe(v)
+  }
+  return output
+}
+
+// -------------------------
+// Server-side authentication & authorization helpers
+// -------------------------
+
+export type ServerUser = {
+  id: string
+  role: 'ANALYST' | 'PROSECUTOR' | 'ADMIN' | 'AUDITOR'
+  name?: string
+  email?: string
+  badgeNumber?: string
+}
+
+const rolePermissions: Record<ServerUser['role'], string[]> = {
+  ANALYST: ['log_evidence', 'transfer_custody', 'log_action', 'view_evidence', 'view_case'],
+  PROSECUTOR: ['view_evidence', 'view_case', 'generate_report', 'view_chain_of_custody'],
+  ADMIN: [
+    'log_evidence',
+    'transfer_custody',
+    'log_action',
+    'view_evidence',
+    'view_case',
+    'generate_report',
+    'view_chain_of_custody',
+    'manage_users',
+    'manage_permissions',
+  ],
+  AUDITOR: ['view_evidence', 'view_case', 'view_chain_of_custody'],
+}
+
+export async function authenticate(request: NextRequest): Promise<ServerUser | null> {
+  const principal = getCurrentPrincipal(request)
+  if (!principal) return null
+  try {
+    const profile = await getMyProfile()
+    if (!profile) return null
+    // Normalize role variant to string
+    const roleVariant = (profile as any).role || {}
+    const roleKey = (Object.keys(roleVariant)[0] || 'ANALYST') as ServerUser['role']
+    const id = typeof (profile as any).id === 'string'
+      ? (profile as any).id
+      : (profile as any).id?.toText?.() ?? String((profile as any).id)
+    return {
+      id,
+      role: roleKey,
+      name: (profile as any).name,
+      email: (profile as any).email,
+      badgeNumber: (profile as any).badgeNumber,
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('authenticate error:', e)
+    return null
+  }
+}
+
+export function authorize(user: ServerUser, action: string): boolean {
+  const allowed = rolePermissions[user.role]
+  return !!allowed && allowed.includes(action)
 }

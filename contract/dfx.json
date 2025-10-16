@@ -3,6 +3,19 @@
     "contract_backend": {
       "main": "src/contract_backend/main.mo",
       "type": "motoko"
+    },
+    "internet_identity": {
+      "type": "custom",
+      "candid": "internet_identity.did",
+      "wasm": "internet_identity_dev.wasm.gz",
+      "gzip": true,
+      "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai",
+      "init_arg": "(opt record { new_flow_origins = opt vec { \"http://localhost:3000\"; \"http://127.0.0.1:3000\" } })",
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      }
     }
   },
   "defaults": {

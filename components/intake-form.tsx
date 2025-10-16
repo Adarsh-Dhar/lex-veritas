@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar, MapPin, Loader2 } from "lucide-react"
 import FileUploadArea from "./file-upload-area"
 import { useAuth } from "@/lib/auth-context"
+import { EvidenceTypeEnum, logEvidence } from "@/lib/contract"
 
 interface IntakeFormProps {
   onSubmit: (data: any) => void
@@ -45,32 +46,10 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchCases()
+    setIsLoadingCases(false)
   }, [])
 
-  const fetchCases = async () => {
-    try {
-      setIsLoadingCases(true)
-      const response = await fetch('/api/cases', {
-        method: 'GET',
-        credentials: 'include',
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch cases')
-      }
-
-      const data = await response.json()
-      if (data.success) {
-        setCases(data.data.cases || [])
-      }
-    } catch (err) {
-      console.error('Error fetching cases:', err)
-      setError('Failed to load cases')
-    } finally {
-      setIsLoadingCases(false)
-    }
-  }
+  // Cases listing removed (no REST/DB). Optional: pull from canister if supported.
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -92,58 +71,44 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
     setError(null)
 
     try {
-      // Convert file to base64
-      const fileBuffer = await uploadedFile.arrayBuffer()
-      const base64Data = Buffer.from(fileBuffer).toString('base64')
+      // In on-chain flow, compute or receive initial hash and store references via canister.
+      // Placeholder for file processing (hashing/upload handled off-chain or by separate flow)
+      const initialHash = "" // compute client-side if needed
+      const storyProtocolIpId = ""
+      const icpCanisterId = ""
 
-      const evidenceData = {
+      const typeVariant = (EvidenceTypeEnum as any)[formData.evidenceType] ?? EvidenceTypeEnum.OTHER
+      const res = await logEvidence({
         caseId: formData.caseId,
         itemNumber: formData.itemNumber,
-        evidenceType: formData.evidenceType,
+        evidenceType: typeVariant,
         description: formData.description,
-        collectedAt: new Date().toISOString(),
         location: formData.location,
-        reasonForCollection: formData.reasonForCollection,
-        handlingNotes: formData.handlingNotes,
-        fileData: base64Data,
-        collectedById: user.id,
-      }
-
-      const response = await fetch('/api/evidence', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(evidenceData),
+        initialHash,
+        storyProtocolIpId,
+        icpCanisterId,
       })
 
-      const data = await response.json()
+      if ('err' in res) throw new Error(res.err)
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create evidence item')
-      }
-
-      if (data.success) {
-        onSubmit({
-          ...formData,
-          fileName: uploadedFile.name,
-          fileSize: (uploadedFile.size / 1024 / 1024).toFixed(2),
-          timestamp: new Date().toLocaleString("en-US", {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            timeZone: "UTC",
-          }),
-          location: formData.location,
-          hash: data.data.initialHash,
-          ipaRecord: data.data.storyProtocolIpId,
-          canisterId: data.data.icpCanisterId,
-        })
-      }
+      onSubmit({
+        ...formData,
+        fileName: uploadedFile.name,
+        fileSize: (uploadedFile.size / 1024 / 1024).toFixed(2),
+        timestamp: new Date().toLocaleString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          timeZone: "UTC",
+        }),
+        location: formData.location,
+        hash: res.ok.initialHash,
+        ipaRecord: res.ok.storyProtocolIpId,
+        canisterId: res.ok.icpCanisterId,
+      })
     } catch (err) {
       console.error('Error creating evidence item:', err)
       setError(err instanceof Error ? err.message : 'Failed to create evidence item')

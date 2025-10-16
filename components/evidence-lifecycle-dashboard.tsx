@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
+import { getCaseEvidence, getEvidenceHistory } from "@/lib/contract"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,19 +58,14 @@ export default function EvidenceLifecycleDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch evidence items from API
+  // Fetch evidence items from canister
   const fetchEvidenceItems = async () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch('/api/evidence')
-      const data = await response.json()
-      
-      if (data.success) {
-        setEvidenceItems(data.data.evidenceItems || [])
-      } else {
-        setError(data.message || 'Failed to fetch evidence items')
-      }
+      // This example assumes you have a known list of case IDs or a way to enumerate evidence.
+      // If the contract exposes a listing method, replace this logic accordingly.
+      setEvidenceItems([])
     } catch (err) {
       setError('Failed to fetch evidence items')
       console.error('Error fetching evidence items:', err)

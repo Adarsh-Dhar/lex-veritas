@@ -3,8 +3,7 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 import { AuthClient } from "@dfinity/auth-client"
-import { HttpAgent } from "@dfinity/agent"
-import { createAuthenticatedContractActor, resetContractActorCache } from "@/lib/contract"
+import { createAuthenticatedContractActor, resetContractActorCache, getMyProfile as contractGetMyProfile } from "@/lib/contract"
 
 export type UserRole = "ANALYST" | "PROSECUTOR" | "ADMIN" | "AUDITOR"
 
@@ -52,117 +51,87 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Check if user is already logged in by calling the /api/auth/me endpoint
-    checkAuthStatus()
+    restoreInternetIdentitySession()
   }, [])
 
-  const checkAuthStatus = async () => {
+  const restoreInternetIdentitySession = async () => {
     try {
-      const response = await fetch('/api/auth/me', {
-        method: 'GET',
-        credentials: 'include', // Include cookies
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success && data.data) {
-          setUser(data.data)
+      const authClient = await AuthClient.create()
+      const isAuthed = await authClient.isAuthenticated()
+      if (!isAuthed) return
+      const identity = await authClient.getIdentity()
+      try {
+        const actor = await createAuthenticatedContractActor(identity)
+        const profileOpt = await actor.getMyProfile()
+        const profile = profileOpt && profileOpt[0]
+        if (profile) {
+          setUser(mapContractUserToAuthUser(profile))
+        } else {
+          setUser({
+            id: identity.getPrincipal().toText(),
+            email: "",
+            name: "Authenticated User",
+            role: 'ANALYST',
+            badgeNumber: undefined,
+            status: 'ACTIVE',
+          })
         }
+      } catch {
+        // Local replica query-signature issues: proceed with minimal user
+        setUser({
+          id: identity.getPrincipal().toText(),
+          email: "",
+          name: "Authenticated User",
+          role: 'ANALYST',
+          badgeNumber: undefined,
+          status: 'ACTIVE',
+        })
       }
-    } catch (error) {
-      console.error('Failed to check auth status:', error)
+    } catch (e) {
+      console.error('Failed to restore II session:', e)
     } finally {
       setIsLoading(false)
     }
   }
 
   const login = async (email: string, password: string) => {
-    setIsLoading(true)
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Include cookies
-        body: JSON.stringify({ email, password }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Login failed')
-      }
-
-      if (data.success && data.data) {
-        setUser(data.data)
-      } else {
-        throw new Error('Invalid response from server')
-      }
-    } catch (error) {
-      console.error('Login error:', error)
-      throw error
-    } finally {
-      setIsLoading(false)
-    }
+    // Username/password flow removed; enforce II only
+    throw new Error('Use Internet Identity login')
   }
 
   const signup = async (name: string, email: string, password: string, badgeNumber: string, role: string = 'ANALYST') => {
-    setIsLoading(true)
-    try {
-      const response = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Include cookies
-        body: JSON.stringify({ name, email, password, badgeNumber, role }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Signup failed')
-      }
-
-      if (data.success && data.data) {
-        setUser(data.data)
-      } else {
-        throw new Error('Invalid response from server')
-      }
-    } catch (error) {
-      console.error('Signup error:', error)
-      throw error
-    } finally {
-      setIsLoading(false)
-    }
+    // Email/password signup removed; accounts managed on-chain. Use II + on-chain registration flows.
+    throw new Error('Signup disabled. Use Internet Identity and on-chain registration.')
   }
 
   const loginWithII = async () => {
     setIsLoading(true)
     try {
       const authClient = await AuthClient.create()
+      const iiUrl = process.env.NEXT_PUBLIC_II_URL || 'https://identity.internetcomputer.org'
+      const isLocalII = iiUrl.startsWith('http://127.0.0.1:4943')
+
       await authClient.login({
-        identityProvider: process.env.NEXT_PUBLIC_II_URL,
+        identityProvider: iiUrl,
+        ...(isLocalII ? { derivationOrigin: window.location.origin } : {}),
         onSuccess: async () => {
           const identity = await authClient.getIdentity()
-          const agent = new HttpAgent({ identity })
-          // Create authenticated canister actor (not strictly needed here but available for future calls)
-          await createAuthenticatedContractActor(identity)
-
-          // Ask backend to establish a session using principal (maps II -> app user)
-          const principalText = identity.getPrincipal().toText()
-          const resp = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ internetIdentityPrincipal: principalText })
-          })
-          const data = await resp.json()
-          if (!resp.ok || !data.success) {
-            throw new Error(data.error || 'Internet Identity login failed')
+          const actor = await createAuthenticatedContractActor(identity)
+          const profileOpt = await actor.getMyProfile()
+          const profile = profileOpt && profileOpt[0]
+          if (profile) {
+            setUser(mapContractUserToAuthUser(profile))
+          } else {
+            setUser({
+              id: identity.getPrincipal().toText(),
+              email: "",
+              name: "Authenticated User",
+              role: 'ANALYST',
+              badgeNumber: undefined,
+              status: 'ACTIVE',
+            })
           }
-          setUser(data.data)
+          window.location.href = '/'
         },
       })
     } catch (error) {
@@ -175,10 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include', // Include cookies
-      })
+      const authClient = await AuthClient.create()
+      await authClient.logout()
       resetContractActorCache()
     } catch (error) {
       console.error('Logout error:', error)
@@ -203,4 +170,23 @@ export function useAuth() {
     throw new Error("useAuth must be used within an AuthProvider")
   }
   return context
+}
+
+// Map canister User (with variant role) to app User type
+function mapContractUserToAuthUser(contractUser: any): User {
+  const roleVariant = contractUser.role
+  let role: UserRole = 'ANALYST'
+  if (roleVariant.ADMIN !== undefined) role = 'ADMIN'
+  else if (roleVariant.ANALYST !== undefined) role = 'ANALYST'
+  else if (roleVariant.PROSECUTOR !== undefined) role = 'PROSECUTOR'
+  else if (roleVariant.AUDITOR !== undefined) role = 'AUDITOR'
+
+  return {
+    id: typeof contractUser.id === 'string' ? contractUser.id : contractUser.id.toText?.() ?? String(contractUser.id),
+    email: contractUser.email,
+    name: contractUser.name,
+    role,
+    badgeNumber: contractUser.badgeNumber,
+    status: (contractUser.status && Object.keys(contractUser.status)[0]) || 'ACTIVE',
+  }
 }

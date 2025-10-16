@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle2 } from "lucide-react"
+import { transferCustody } from "@/lib/contract"
 
 interface EvidenceItem {
   id: string
@@ -31,17 +32,18 @@ export default function LogActionForm({ evidence }: LogActionFormProps) {
   const [details, setDetails] = useState("")
   const [submitted, setSubmitted] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (selectedEvidence && actionType) {
-      setSubmitted(true)
-      setTimeout(() => {
-        setSelectedEvidence("")
-        setActionType("")
-        setDetails("")
-        setSubmitted(false)
-      }, 3000)
-    }
+    if (!selectedEvidence || !actionType) return
+    // If the contract exposes a logAction method, call it here.
+    // Placeholder: treat some actions similarly to transfer with notes only.
+    setSubmitted(true)
+    setTimeout(() => {
+      setSelectedEvidence("")
+      setActionType("")
+      setDetails("")
+      setSubmitted(false)
+    }, 2000)
   }
 
   return (

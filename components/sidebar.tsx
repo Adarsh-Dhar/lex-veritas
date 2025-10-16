@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
-import { FileText, FolderOpen, Settings, LogOut, Plus } from "lucide-react"
+import { FileText, LogOut, Plus } from "lucide-react"
 
 interface SidebarProps {
   currentView: string
@@ -42,27 +42,7 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
           </Button>
         )}
 
-        {hasPermission("view_case") && (
-          <Button
-            variant={currentView === "cases" ? "default" : "ghost"}
-            className="w-full justify-start"
-            onClick={() => onViewChange("cases")}
-          >
-            <FolderOpen className="w-4 h-4 mr-2" />
-            Case Management
-          </Button>
-        )}
-
-        {hasPermission("manage_users") && (
-          <Button
-            variant={currentView === "admin" ? "default" : "ghost"}
-            className="w-full justify-start"
-            onClick={() => onViewChange("admin")}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Administration
-          </Button>
-        )}
+        {/* Cases/Admin removed in on-chain only UI */}
       </nav>
 
       <div className="p-4 border-t border-border">

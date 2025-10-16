@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
+import { transferCustody } from "@/lib/contract"
 
 interface EvidenceItem {
   id: string
@@ -41,22 +42,12 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
     setError("")
 
     try {
-      const response = await fetch(`/api/evidence/${selectedEvidence}/custody-logs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'TRANSFER',
-          notes: notes || `Transferred to ${receivingParty}`,
-        }),
+      const res = await transferCustody({
+        evidenceId: selectedEvidence,
+        toUserId: receivingParty,
+        notes: notes || `Transferred to ${receivingParty}`,
       })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to record custody transfer')
-      }
+      if ('err' in res) throw new Error(res.err)
 
       setSubmitted(true)
       setSelectedEvidence("")

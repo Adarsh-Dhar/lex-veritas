@@ -1,95 +1,166 @@
 "use client"
 
 import type React from "react"
-
-import { useState } from "react"
-import { useAuth } from "@/lib/auth-context"
+import { useEffect, useMemo, useState } from "react"
+import { AuthClient } from "@dfinity/auth-client"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, Lock } from "lucide-react"
-import Link from "next/link"
+import { AlertCircle, Info, Lock } from "lucide-react"
 
 export default function LoginPage() {
-  const { login, loginWithII, isLoading } = useAuth()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [authClient, setAuthClient] = useState<AuthClient | null>(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [principal, setPrincipal] = useState<string>("Click \"Whoami\" to see your principal ID")
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const identityProvider = useMemo(() => {
+    const envUrl = process.env.NEXT_PUBLIC_II_URL
+    if (envUrl && envUrl.length > 0) return envUrl
+    // Default: mainnet II
+    return "https://identity.internetcomputer.org"
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const client = await AuthClient.create()
+        if (!mounted) return
+        setAuthClient(client)
+        const authed = await client.isAuthenticated()
+        setIsAuthenticated(authed)
+      } catch (e: any) {
+        setError(e?.message || "Failed to initialize authentication")
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const login = async () => {
+    if (!authClient) return
     setError("")
+    setBusy(true)
     try {
-      await login(email, password)
+      const isLocalII =
+        identityProvider.includes("localhost:4943") || identityProvider.includes("127.0.0.1:4943")
+      await authClient.login({
+        identityProvider,
+        ...(isLocalII ? { derivationOrigin: window.location.origin } : {}),
+        onSuccess: async () => {
+          setIsAuthenticated(true)
+          // Refresh so AuthProvider restores II session and loads dashboard
+          try { window.location.href = "/" } catch {}
+        },
+        onError: (err) => {
+          const message = typeof err === "string" ? err : (err as any)?.message || "Login failed"
+          setError(message)
+        },
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed")
+      const message = (err as any)?.message || "Login failed"
+      setError(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const logout = async () => {
+    if (!authClient) return
+    setError("")
+    setBusy(true)
+    try {
+      await authClient.logout()
+      setIsAuthenticated(false)
+      setPrincipal("Click \"Whoami\" to see your principal ID")
+    } catch (err) {
+      const message = (err as any)?.message || "Logout failed"
+      setError(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const whoami = async () => {
+    setError("")
+    setPrincipal("Loading...")
+    try {
+      if (!authClient) return
+      const identity = authClient.getIdentity()
+      const principalText = identity.getPrincipal().toText()
+      setPrincipal(principalText || "2vxsx-fae")
+    } catch (err) {
+      setPrincipal("2vxsx-fae")
     }
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/10 flex items-center justify-center px-4">
-      <Card className="w-full max-w-md border-border/50 shadow-2xl">
-        <CardHeader className="space-y-2 text-center">
-          <div className="flex justify-center mb-4">
+      <Card className="w-full max-w-2xl border-border/50 shadow-2xl">
+        <CardHeader className="space-y-2">
+          <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
               <Lock className="w-6 h-6 text-primary-foreground" />
             </div>
+            <div>
+              <CardTitle className="text-2xl">Integrating Internet Identity</CardTitle>
+              <CardDescription>Authenticate and retrieve your principal (Whoami)</CardDescription>
+            </div>
           </div>
-          <CardTitle className="text-2xl">Lex Veritas 2.0</CardTitle>
-          <CardDescription>Digital Evidence Management System</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="mb-6 rounded-lg border border-border/60 bg-muted/30 p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 text-muted-foreground">
+                <Info className="h-4 w-4" />
+              </div>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  A <strong>principal</strong> is a unique identifier on the Internet Computer. It represents an
+                  entity (user, canister smart contract, or other) and is used for identification and authorization.
+                </p>
+                <p>
+                  Click <span className="font-medium">Whoami</span> to see the principal you are interacting with. If
+                  you are not signed in, you will see the anonymous principal <code>2vxsx-fae</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {!isAuthenticated ? (
+              <Button type="button" variant="default" disabled={busy || !authClient} onClick={login}>
+                {busy ? "Opening Internet Identity..." : "Login with Internet Identity"}
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" disabled={busy} onClick={logout}>
+                Logout
+              </Button>
             )}
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Email</label>
-              <Input
-                type="email"
-                placeholder="analyst@lexveritas.gov"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={isLoading}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Password</label>
-              <Input
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={isLoading}
-              />
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              Don't have an account?{" "}
-              <Link href="/signup" className="text-primary hover:underline">
-                Create one
-              </Link>
-            </p>
-          </div>
-
-          <div className="mt-4">
-            <Button type="button" variant="outline" className="w-full" disabled={isLoading} onClick={loginWithII}>
-              Sign in with Internet Identity
+            <Button type="button" variant="secondary" disabled={busy || !authClient} onClick={whoami}>
+              Whoami
             </Button>
           </div>
 
+          {principal && (
+            <div className="mt-6">
+              <h3 className="text-sm text-muted-foreground">Your principal ID is:</h3>
+              <div className="mt-2 rounded-md border border-border/60 bg-background/60 p-3 font-mono text-sm">
+                {principal}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
