@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar, MapPin, Loader2 } from "lucide-react"
 import FileUploadArea from "./file-upload-area"
 import { useAuth } from "@/lib/auth-context"
-import { EvidenceTypeEnum, logEvidence } from "@/lib/contract"
+import { EvidenceTypeEnum, logEvidence, listCases, isMockEvidence, getContractConfig, registerUser, RoleEnum } from "@/lib/contract"
 
 interface IntakeFormProps {
   onSubmit: (data: any) => void
@@ -44,9 +44,35 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingCases, setIsLoadingCases] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [evidenceData, setEvidenceData] = useState<any>(null)
 
   useEffect(() => {
-    setIsLoadingCases(false)
+    let mounted = true
+    ;(async () => {
+      try {
+        setIsLoadingCases(true)
+        const results = await listCases()
+        if (!mounted) return
+        // Map to local Case shape minimally
+        setCases(
+          results.map((c) => ({
+            id: c.id,
+            caseNumber: c.caseNumber,
+            leadInvestigator: { id: "", name: "", badgeNumber: "" },
+          })),
+        )
+      } catch {
+        if (!mounted) return
+        setCases([])
+      } finally {
+        if (!mounted) return
+        setIsLoadingCases(false)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
   }, [])
 
   // Cases listing removed (no REST/DB). Optional: pull from canister if supported.
@@ -69,6 +95,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
     setIsLoading(true)
     setError(null)
+    setSuccess(null)
 
     try {
       // In on-chain flow, compute or receive initial hash and store references via canister.
@@ -78,20 +105,42 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
       const icpCanisterId = ""
 
       const typeVariant = (EvidenceTypeEnum as any)[formData.evidenceType] ?? EvidenceTypeEnum.OTHER
-      const res = await logEvidence({
-        caseId: formData.caseId,
-        itemNumber: formData.itemNumber,
-        evidenceType: typeVariant,
-        description: formData.description,
-        location: formData.location,
-        initialHash,
-        storyProtocolIpId,
-        icpCanisterId,
-      })
+      const attemptLog = async () =>
+        await logEvidence({
+          caseId: formData.caseId,
+          itemNumber: formData.itemNumber,
+          evidenceType: typeVariant,
+          description: formData.description,
+          location: formData.location,
+          initialHash,
+          storyProtocolIpId,
+          icpCanisterId,
+        })
+
+      let res = await attemptLog()
+
+      if ('err' in res && typeof res.err === 'string' && res.err.toLowerCase().includes('user not registered')) {
+        try {
+          const desiredRole = (typeof window !== 'undefined' ? localStorage.getItem('lv_role_override') : null) || 'ANALYST'
+          const roleVariant = (RoleEnum as any)[desiredRole] || RoleEnum.ANALYST
+          await registerUser({
+            name: user?.name || '',
+            email: user?.email || '',
+            badgeNumber: user?.badgeNumber || '',
+            role: roleVariant,
+          })
+          res = await attemptLog()
+        } catch {}
+      }
 
       if ('err' in res) throw new Error(res.err)
 
-      onSubmit({
+      // If returned evidence looks like a dev mock, do not show success UI
+      if (isMockEvidence(res.ok)) {
+        throw new Error("Canister not deployed: evidence not recorded on-chain")
+      }
+
+      const evidenceRecord = {
         ...formData,
         fileName: uploadedFile.name,
         fileSize: (uploadedFile.size / 1024 / 1024).toFixed(2),
@@ -108,13 +157,87 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
         hash: res.ok.initialHash,
         ipaRecord: res.ok.storyProtocolIpId,
         canisterId: res.ok.icpCanisterId,
-      })
+      }
+
+      // Persist locally so the dashboard can read (also useful in real flow as cache)
+      try {
+        if (typeof window !== 'undefined') {
+          const selectedCase = cases.find(c => c.id === formData.caseId)
+          const storedRaw = window.localStorage.getItem('lv_mock_evidence')
+          const stored: any[] = storedRaw ? JSON.parse(storedRaw) : []
+          const compositeId = `CASE-${formData.caseId}-${formData.itemNumber}`
+          const backendId = (res as any).ok?.id
+          const toStore = {
+            id: compositeId,
+            itemNumber: formData.itemNumber,
+            evidenceType: formData.evidenceType || 'OTHER',
+            description: formData.description,
+            collectedAt: new Date().toISOString(),
+            location: formData.location,
+            initialHash: evidenceRecord.hash,
+            storyProtocolIpId: evidenceRecord.ipaRecord,
+            icpCanisterId: evidenceRecord.canisterId,
+            case: {
+              id: formData.caseId,
+              caseNumber: selectedCase?.caseNumber || formData.caseId,
+            },
+            collectedBy: {
+              id: user?.id || '',
+              name: user?.name || 'Unknown',
+              badgeNumber: user?.badgeNumber || 'N/A',
+            },
+            custodyLogs: [],
+          }
+          const dedup = [...stored.filter(e => e.id !== toStore.id), toStore]
+          window.localStorage.setItem('lv_mock_evidence', JSON.stringify(dedup))
+
+          // Maintain quick index per case
+          const mapRaw = window.localStorage.getItem('lv_case_evidence_ids')
+          const map: Record<string, string[]> = mapRaw ? JSON.parse(mapRaw) : {}
+          const shortId = `${selectedCase?.caseNumber || formData.caseId}-${formData.itemNumber}`
+          const arr = new Set([...(map[formData.caseId] || []), toStore.id, backendId, shortId].filter(Boolean) as string[])
+          map[formData.caseId] = Array.from(arr)
+          window.localStorage.setItem('lv_case_evidence_ids', JSON.stringify(map))
+        }
+      } catch {}
+
+      setEvidenceData(evidenceRecord)
+      setSuccess(`Evidence item ${formData.itemNumber} recorded successfully!`)
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // Provide a helpful hint when canister is not deployed (dev flow)
+      const cfg = getContractConfig()
+      const isNoWasm = message.includes('IC0537') || message.toLowerCase().includes('not deployed') || message.toLowerCase().includes('no wasm')
+      const hint = isNoWasm
+        ? `Canister not deployed; evidence was not recorded on-chain.\nCanister: ${cfg.canisterId ?? '<missing>'}\nHost: ${cfg.host}\nIn dev, run: dfx start (in one terminal) and dfx deploy (in another), then restart the app.`
+        : message
       console.error('Error creating evidence item:', err)
-      setError(err instanceof Error ? err.message : 'Failed to create evidence item')
+      setError(hint)
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleProceedToLifecycle = () => {
+    if (evidenceData) {
+      onSubmit(evidenceData)
+    }
+  }
+
+  const handleResetForm = () => {
+    setFormData({
+      caseId: "",
+      itemNumber: "",
+      evidenceType: "",
+      description: "",
+      location: "",
+      reasonForCollection: "",
+      handlingNotes: "",
+    })
+    setUploadedFile(null)
+    setError(null)
+    setSuccess(null)
+    setEvidenceData(null)
   }
 
   return (
@@ -246,9 +369,32 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
           </div>
         )}
 
+        {success && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+            <p className="text-sm text-green-800">{success}</p>
+            <div className="mt-3 flex gap-2">
+              <Button
+                onClick={handleProceedToLifecycle}
+                size="sm"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                View in Evidence Lifecycle
+              </Button>
+              <Button
+                onClick={handleResetForm}
+                size="sm"
+                variant="outline"
+                className="border-border text-foreground hover:bg-input"
+              >
+                Log Another Item
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Button
           onClick={handleSubmit}
-          disabled={!uploadedFile || !formData.caseId || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading}
+          disabled={!uploadedFile || !formData.caseId || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading || !!success}
           className="mt-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-6 text-base"
         >
           {isLoading ? (
@@ -256,6 +402,8 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               Processing...
             </>
+          ) : success ? (
+            "Evidence Recorded Successfully"
           ) : (
             "Calculate Hash & Record Evidence"
           )}

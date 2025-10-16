@@ -400,17 +400,44 @@ export async function logEvidence(params: {
   storyProtocolIpId: string;
   icpCanisterId: string;
 }): Promise<Result<EvidenceItem>> {
-  const actor = await getContractActor();
-  return actor.logEvidence(
-    params.caseId,
-    params.itemNumber,
-    params.evidenceType,
-    params.description,
-    params.location,
-    params.initialHash,
-    params.storyProtocolIpId,
-    params.icpCanisterId
-  );
+  try {
+    const actor = await getContractActor();
+    return await actor.logEvidence(
+      params.caseId,
+      params.itemNumber,
+      params.evidenceType,
+      params.description,
+      params.location,
+      params.initialHash,
+      params.storyProtocolIpId,
+      params.icpCanisterId
+    );
+  } catch (error: any) {
+    const msg = String(error?.message || error || "");
+    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
+    if (isNoWasm) {
+      // Development-friendly fallback so the UI can function without a deployed canister
+      const now = Date.now();
+      const mock: EvidenceItem = {
+        id: `EV-${now}`,
+        caseId: params.caseId,
+        itemNumber: params.itemNumber,
+        evidenceType: params.evidenceType,
+        description: params.description,
+        collectedAt: BigInt(now),
+        location: params.location,
+        collectedById: "2vxsx-fae", // anonymous principal placeholder
+        initialHash: params.initialHash || `mock-hash-${now}`,
+        storyProtocolIpId: params.storyProtocolIpId || `mock-ipa-${now}`,
+        icpCanisterId: params.icpCanisterId || "aaaaa-aa",
+        custodyLogs: [],
+      };
+      // eslint-disable-next-line no-console
+      console.warn("[contract.logEvidence] Canister has no wasm. Returning mock evidence for development.");
+      return { ok: mock };
+    }
+    return { err: msg };
+  }
 }
 
 export async function transferCustody(params: {
@@ -424,17 +451,95 @@ export async function transferCustody(params: {
 }
 
 export async function getEvidenceHistory(evidenceId: string): Promise<EvidenceItem | null> {
-  const actor = await getContractActor();
-  const res = await actor.getEvidenceHistory(evidenceId);
-  const [value] = res;
-  return value ?? null;
+  try {
+    const actor = await getContractActor();
+    const res = await actor.getEvidenceHistory(evidenceId);
+    const [value] = res;
+    return value ?? null;
+  } catch (error: any) {
+    const msg = String(error?.message || error || "");
+    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
+    if (isNoWasm) {
+      try {
+        if (typeof window !== 'undefined') {
+          const raw = window.localStorage.getItem('lv_mock_evidence');
+          if (raw) {
+            const list = JSON.parse(raw) as any[];
+            let found = list.find((e) => e.id === evidenceId);
+            if (!found) {
+              const byComposite = list.find((e) => typeof e.case?.id === 'string' && typeof e.itemNumber === 'string' && `CASE-${e.case.id}-${e.itemNumber}` === evidenceId)
+              if (byComposite) found = byComposite
+            }
+            if (!found) {
+              const byShort = list.find((e) => typeof e.case?.caseNumber === 'string' && typeof e.itemNumber === 'string' && `${e.case.caseNumber}-${e.itemNumber}` === evidenceId)
+              if (byShort) found = byShort
+            }
+            if (found) {
+              return {
+                id: found.id,
+                caseId: found.case.id,
+                itemNumber: found.itemNumber,
+                evidenceType: (EvidenceTypeEnum as any)[found.evidenceType] ?? EvidenceTypeEnum.OTHER,
+                description: found.description,
+                collectedAt: BigInt(Date.parse(found.collectedAt || new Date().toISOString())),
+                location: found.location,
+                collectedById: found.collectedBy?.id || '2vxsx-fae',
+                initialHash: found.initialHash,
+                storyProtocolIpId: found.storyProtocolIpId,
+                icpCanisterId: found.icpCanisterId,
+                custodyLogs: [],
+              } as EvidenceItem;
+            }
+          }
+        }
+      } catch {}
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function getCaseEvidence(caseId: string): Promise<string[] | null> {
-  const actor = await getContractActor();
-  const res = await actor.getCaseEvidence(caseId);
-  const [value] = res;
-  return value ?? null;
+  try {
+    const actor = await getContractActor();
+    const res = await actor.getCaseEvidence(caseId);
+    const [value] = res;
+    return value ?? null;
+  } catch (error: any) {
+    const msg = String(error?.message || error || "");
+    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
+    if (isNoWasm) {
+      try {
+        if (typeof window !== 'undefined') {
+          const mapRaw = window.localStorage.getItem('lv_case_evidence_ids');
+          if (mapRaw) {
+            const map = JSON.parse(mapRaw) as Record<string, string[]>;
+            const ids = map[caseId]
+            if (ids && ids.length) return ids;
+          }
+          const evRaw = window.localStorage.getItem('lv_mock_evidence');
+          if (evRaw) {
+            const list = JSON.parse(evRaw) as any[];
+            const variants = new Set<string>();
+            for (const e of list) {
+              if (e?.case?.id !== caseId) continue;
+              const rawId = typeof e.id === 'string' ? e.id : ''
+              const composite = `CASE-${e.case.id}-${e.itemNumber}`
+              const shortId = `${e.case.caseNumber}-${e.itemNumber}`
+              if (rawId) variants.add(rawId)
+              variants.add(composite)
+              variants.add(shortId)
+            }
+            return Array.from(variants)
+          }
+        }
+      } catch {}
+      // eslint-disable-next-line no-console
+      console.warn("[contract.getCaseEvidence] Canister has no wasm. Returning empty list for development.");
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function getMyProfile(): Promise<User | null> {
@@ -442,4 +547,36 @@ export async function getMyProfile(): Promise<User | null> {
   const res = await actor.getMyProfile();
   const [value] = res;
   return value ?? null;
+}
+
+// -------------------------
+// Cases listing (client-side helper)
+// -------------------------
+
+export type SimpleCase = { id: string; caseNumber: string };
+
+export async function listCases(): Promise<SimpleCase[]> {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem("lv_known_cases");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<{ id: string; caseNumber: string }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((c) => ({ id: c.id, caseNumber: c.caseNumber }));
+  } catch {
+    return [];
+  }
+}
+
+// -------------------------
+// Dev helpers
+// -------------------------
+
+export function isMockEvidence(e: EvidenceItem): boolean {
+  // Heuristic based on values we set in the dev fallback
+  const idLooksMock = typeof e.id === 'string' && e.id.startsWith('EV-')
+  const canisterLooksMock = e.icpCanisterId === 'aaaaa-aa'
+  const ipaLooksMock = typeof e.storyProtocolIpId === 'string' && e.storyProtocolIpId.startsWith('mock-ipa-')
+  const hashLooksMock = typeof e.initialHash === 'string' && e.initialHash.startsWith('mock-hash-')
+  return Boolean(idLooksMock || canisterLooksMock || ipaLooksMock || hashLooksMock)
 }
