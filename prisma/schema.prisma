@@ -1,0 +1,130 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// 1. Define the database connection
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 2. Define the Prisma client generator
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 3. Define the data models for the Lex Veritas 2.0 application
+
+// Represents an authorized user of the system, such as a forensic analyst or prosecutor.
+// Authentication would be handled by a system like ICP's Internet Identity.
+model User {
+  id            String   @id @default(cuid())
+  principalId   String   @unique // The unique, anonymous identifier from Internet Identity
+  name          String
+  badgeNumber   String   @unique
+  role          Role
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations: A user can be a lead investigator, collect evidence, or be part of a custody transfer.
+  casesLed          Case[]
+  evidenceCollected EvidenceItem[]
+  custodyLogsFrom   CustodyLog[] @relation("FromUser")
+  custodyLogsTo     CustodyLog[] @relation("ToUser")
+
+  @@map("users")
+}
+
+// Represents a legal case that contains one or more pieces of evidence.
+model Case {
+  id                String   @id @default(cuid())
+  caseNumber        String   @unique // The official number for the legal case (e.g., "SF-2025-0087")
+  leadInvestigatorId String @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  leadInvestigator  User           @relation(fields: [leadInvestigatorId], references: [id])
+  evidenceItems     EvidenceItem[]
+
+  @@map("cases")
+}
+
+// The core model representing a single piece of digital evidence.
+// This links the physical/digital item to its immutable on-chain record.
+model EvidenceItem {
+  id                  String       @id @default(cuid())
+  caseId              String
+  itemNumber          String       // A unique identifier within a case (e.g., "001", "002")
+  evidenceType        EvidenceType
+  description         String
+  collectedAt         DateTime     // The exact timestamp of collection
+  location            String       // GPS coordinates or physical address of collection
+  reasonForCollection String?
+  handlingNotes       String?      // Notes on how the evidence was handled at the scene
+  collectedById       String
+
+  // --- Core Integrity Fields ---
+  initialHash         String @unique // The cryptographic hash of the evidence file at the moment of collection
+  storyProtocolIpId   String @unique // The unique ID of the root IP Asset on Story Protocol, serving as the "birth certificate" [1, 2]
+  icpCanisterId       String @unique // The canister ID on the Internet Computer where the encrypted evidence file is securely stored [3, 4]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  case                Case         @relation(fields: [caseId], references: [id])
+  collectedBy         User         @relation(fields: [collectedById], references: [id])
+  custodyLogs         CustodyLog[]
+
+  @@unique([caseId, itemNumber]) // Ensures itemNumber is unique per case
+  @@map("evidence_items")
+}
+
+// Represents a single, immutable event in the chain of custody for an EvidenceItem.
+// Each log entry corresponds to a transaction on the Story Protocol IP Asset.
+model CustodyLog {
+  id                          String        @id @default(cuid())
+  evidenceItemId              String
+  action                      CustodyAction // The type of action performed (e.g., TRANSFER, ANALYSIS)
+  timestamp                   DateTime      // The exact timestamp of the action
+  fromUserId                  String
+  toUserId                    String?       // Optional: The user receiving custody in a TRANSFER action
+  notes                       String?       // Any notes relevant to this specific action
+  storyProtocolTransactionId  String        @unique // The on-chain transaction hash on Story Protocol that proves this action occurred [5]
+
+  // Relations
+  evidenceItem                EvidenceItem @relation(fields: [evidenceItemId], references: [id])
+  fromUser                    User         @relation("FromUser", fields: [fromUserId], references: [id])
+  toUser                      User?        @relation("ToUser", fields: [toUserId], references: [id])
+
+  @@unique([evidenceItemId, timestamp]) // Ensure unique custody log per evidence item and timestamp
+  @@map("custody_logs")
+}
+
+// --- Enums for data consistency ---
+
+enum Role {
+  ADMIN
+  ANALYST
+  PROSECUTOR
+  AUDITOR
+}
+
+enum EvidenceType {
+  LAPTOP_HARD_DRIVE
+  MOBILE_PHONE
+  USB_DRIVE
+  SURVEILLANCE_FOOTAGE
+  CLOUD_DATA
+  DOCUMENT
+  OTHER
+}
+
+enum CustodyAction {
+  COLLECTION
+  TRANSFER
+  ANALYSIS
+  VIEW
+  SUBMITTED_TO_COURT
+  ARCHIVED
+}
