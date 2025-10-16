@@ -5,8 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Loader2 } from "lucide-react"
+import { Search, Loader2, Plus } from "lucide-react"
 import CaseDetailView from "./case-detail-view"
+import CreateCaseDialog from "./create-case-dialog"
+import { useAuth } from "@/lib/auth-context"
 
 interface CaseData {
   id: string
@@ -27,12 +29,14 @@ interface CaseData {
 }
 
 export default function CaseManagementView() {
+  const { hasPermission } = useAuth()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCase, setSelectedCase] = useState<CaseData | null>(null)
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "closed" | "archived">("all")
   const [cases, setCases] = useState<CaseData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
 
   useEffect(() => {
     fetchCases()
@@ -53,7 +57,7 @@ export default function CaseManagementView() {
 
       const data = await response.json()
       if (data.success) {
-        setCases(data.data)
+        setCases(data.data.cases || [])
       } else {
         throw new Error(data.error || 'Failed to fetch cases')
       }
@@ -65,7 +69,12 @@ export default function CaseManagementView() {
     }
   }
 
-  const filteredCases = cases.filter((caseItem) => {
+  const handleCaseCreated = (newCase: CaseData) => {
+    // Refresh the cases list to include the new case
+    fetchCases()
+  }
+
+  const filteredCases = Array.isArray(cases) ? cases.filter((caseItem) => {
     const matchesSearch =
       caseItem.caseNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       caseItem.leadInvestigator.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -75,7 +84,7 @@ export default function CaseManagementView() {
     const matchesStatus = statusFilter === "all" || statusFilter === "active"
 
     return matchesSearch && matchesStatus
-  })
+  }) : []
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -147,8 +156,18 @@ export default function CaseManagementView() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Search Cases</CardTitle>
-          <CardDescription>Find cases by number or investigator</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Search Cases</CardTitle>
+              <CardDescription>Find cases by number or investigator</CardDescription>
+            </div>
+            {hasPermission("log_evidence") && (
+              <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Create Case
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
@@ -231,6 +250,12 @@ export default function CaseManagementView() {
           </CardContent>
         </Card>
       )}
+
+      <CreateCaseDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onCaseCreated={handleCaseCreated}
+      />
     </div>
   )
 }

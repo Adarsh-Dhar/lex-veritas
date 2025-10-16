@@ -72,7 +72,7 @@ export default function CaseDetailView({ caseData, onBack }: CaseDetailViewProps
 
       const data = await response.json()
       if (data.success) {
-        setEvidenceItems(data.data)
+        setEvidenceItems(data.data.evidenceItems || [])
       } else {
         throw new Error(data.error || 'Failed to fetch evidence items')
       }

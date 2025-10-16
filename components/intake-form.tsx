@@ -167,7 +167,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
                 {isLoadingCases ? (
-                  <SelectItem value="" disabled>Loading cases...</SelectItem>
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading cases...</div>
                 ) : Array.isArray(cases) && cases.length > 0 ? (
                   cases.map((caseItem) => (
                     <SelectItem key={caseItem.id} value={caseItem.id}>
@@ -175,7 +175,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
                     </SelectItem>
                   ))
                 ) : (
-                  <SelectItem value="" disabled>No cases available</SelectItem>
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">No cases available</div>
                 )}
               </SelectContent>
             </Select>

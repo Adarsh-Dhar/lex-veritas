@@ -52,11 +52,11 @@ export default function FileUploadArea({ onFileUpload }: FileUploadAreaProps) {
           isDragging ? "border-primary bg-primary/5" : "border-border bg-input/30"
         }`}
       >
-        <input type="file" onChange={handleFileInput} className="hidden" id="file-input" accept=".E01,.DD,.RAW,.AFF" />
+        <input type="file" onChange={handleFileInput} className="hidden" id="file-input" accept=".E01,.DD,.RAW,.AFF,.pdf,.jpg,.jpeg" />
         <label htmlFor="file-input" className="cursor-pointer">
           <Upload className="h-12 w-12 mx-auto mb-3 text-muted-foreground" />
-          <p className="text-foreground font-semibold mb-1">Drag & Drop Bit-for-Bit Forensic Image File Here</p>
-          <p className="text-sm text-muted-foreground mb-4">Supported formats: .E01, .DD, .RAW, .AFF</p>
+          <p className="text-foreground font-semibold mb-1">Drag & Drop Evidence File Here</p>
+          <p className="text-sm text-muted-foreground mb-4">Supported formats: .E01, .DD, .RAW, .AFF, .PDF, .JPG, .JPEG</p>
         </label>
       </div>
 

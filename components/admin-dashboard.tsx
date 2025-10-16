@@ -50,7 +50,7 @@ export default function AdminDashboard() {
 
       const data = await response.json()
       if (data.success) {
-        setUsers(data.data)
+        setUsers(data.data.users || [])
       } else {
         throw new Error(data.error || 'Failed to fetch users')
       }
