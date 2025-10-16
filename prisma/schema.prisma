@@ -17,13 +17,16 @@ generator client {
 // Represents an authorized user of the system, such as a forensic analyst or prosecutor.
 // Authentication would be handled by a system like ICP's Internet Identity.
 model User {
-  id            String   @id @default(cuid())
-  principalId   String   @unique // The unique, anonymous identifier from Internet Identity
+  id            String     @id @default(cuid())
+  principalId   String     @unique // The unique, anonymous identifier from Internet Identity
   name          String
-  badgeNumber   String   @unique
+  email         String     @unique
+  passwordHash  String
+  badgeNumber   String     @unique
   role          Role
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   // Relations: A user can be a lead investigator, collect evidence, or be part of a custody transfer.
   casesLed          Case[]
@@ -38,7 +41,7 @@ model User {
 model Case {
   id                String   @id @default(cuid())
   caseNumber        String   @unique // The official number for the legal case (e.g., "SF-2025-0087")
-  leadInvestigatorId String @unique
+  leadInvestigatorId String
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -127,4 +130,10 @@ enum CustodyAction {
   VIEW
   SUBMITTED_TO_COURT
   ARCHIVED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
 }
