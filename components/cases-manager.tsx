@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
-import { createCase, getCaseEvidence, getContractConfig } from "@/lib/contract"
+import { createCase, getCaseEvidence, getContractConfig, logEvidence, EvidenceTypeEnum, getEvidenceHistory } from "@/lib/contract"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useAuth } from "@/lib/auth-context"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 type CaseSummary = {
   id: string
@@ -15,12 +18,26 @@ type CaseSummary = {
 
 export default function CasesManager(): ReactElement {
   const { toast } = useToast()
+  const { user } = useAuth()
   const [creating, setCreating] = useState(false)
   const [caseNumber, setCaseNumber] = useState("")
   const [lookupCaseId, setLookupCaseId] = useState("")
   const [evidenceIds, setEvidenceIds] = useState<string[] | null>(null)
   const [loadingEvidence, setLoadingEvidence] = useState(false)
   const [cases, setCases] = useState<CaseSummary[]>([])
+  const [detailsId, setDetailsId] = useState<string | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsError, setDetailsError] = useState<string | null>(null)
+  const [details, setDetails] = useState<any | null>(null)
+
+  // Add Evidence form state
+  const [selectedCaseId, setSelectedCaseId] = useState("")
+  const [itemNumber, setItemNumber] = useState("")
+  const [evidenceTypeKey, setEvidenceTypeKey] = useState<string>("")
+  const [description, setDescription] = useState("")
+  const [location, setLocation] = useState("")
+  const [addingEvidence, setAddingEvidence] = useState(false)
 
   useEffect(() => {
     try {
@@ -183,8 +200,33 @@ export default function CasesManager(): ReactElement {
               <Label>Evidence IDs</Label>
               <ul className="mt-2 rounded-md border border-border divide-y divide-border">
                 {evidenceIds.map((id) => (
-                  <li key={id} className="p-3 text-sm">
-                    {id}
+                  <li key={id} className="p-3 text-sm flex items-center justify-between gap-3">
+                    <span className="truncate">{id}</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        setDetailsId(id)
+                        setDetailsOpen(true)
+                        setDetailsLoading(true)
+                        setDetailsError(null)
+                        setDetails(null)
+                        try {
+                          const data = await getEvidenceHistory(id)
+                          if (!data) {
+                            setDetailsError("No details found for this evidence ID")
+                          } else {
+                            setDetails(data)
+                          }
+                        } catch (err: any) {
+                          setDetailsError(String(err?.message || err))
+                        } finally {
+                          setDetailsLoading(false)
+                        }
+                      }}
+                    >
+                      Details
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -192,6 +234,186 @@ export default function CasesManager(): ReactElement {
           )}
         </CardContent>
       </Card>
+
+      {/* Add Evidence to Case */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Add Evidence to Case</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Case</Label>
+            <Select value={selectedCaseId} onValueChange={setSelectedCaseId}>
+              <SelectTrigger>
+                <SelectValue placeholder={cases.length ? "Select a case" : "No cases available"} />
+              </SelectTrigger>
+              <SelectContent>
+                {cases.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.caseNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="itemNumber">Item Number</Label>
+            <Input id="itemNumber" placeholder="e.g. 001" value={itemNumber} onChange={(e) => setItemNumber(e.target.value)} />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Evidence Type</Label>
+            <Select value={evidenceTypeKey} onValueChange={setEvidenceTypeKey}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(EvidenceTypeEnum).map((k) => (
+                  <SelectItem key={k} value={k}>{k.replaceAll("_", " ")}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Input id="description" placeholder="Short description" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="location">Location</Label>
+            <Input id="location" placeholder="e.g. Evidence Locker A" value={location} onChange={(e) => setLocation(e.target.value)} />
+          </div>
+        </CardContent>
+        <CardFooter>
+          <Button
+            onClick={async () => {
+              if (!selectedCaseId || !itemNumber || !evidenceTypeKey || !description || !location) {
+                toast({ title: "Missing fields", description: "Fill all fields to add evidence", variant: "destructive" })
+                return
+              }
+              try {
+                setAddingEvidence(true)
+                const now = Date.now()
+                const res = await logEvidence({
+                  caseId: selectedCaseId,
+                  itemNumber,
+                  evidenceType: (EvidenceTypeEnum as any)[evidenceTypeKey],
+                  description,
+                  location,
+                  initialHash: `manual-hash-${now}`,
+                  storyProtocolIpId: `manual-ipa-${now}`,
+                  icpCanisterId: "aaaaa-aa",
+                })
+                if ("ok" in res) {
+                  toast({ title: "Evidence logged", description: `Item #${itemNumber} added to ${selectedCaseId}` })
+                  // Persist locally (dev fallback) so dashboards can read
+                  try {
+                    if (typeof window !== 'undefined') {
+                      const raw = window.localStorage.getItem('lv_mock_evidence')
+                      const stored: any[] = raw ? JSON.parse(raw) : []
+                      const selectedCase = cases.find(c => c.id === selectedCaseId)
+                      const toStore = {
+                        id: `CASE-${selectedCaseId}-${itemNumber}`,
+                        itemNumber,
+                        evidenceType: evidenceTypeKey,
+                        description,
+                        collectedAt: new Date().toISOString(),
+                        location,
+                        initialHash: res.ok.initialHash ?? `manual-hash-${now}`,
+                        storyProtocolIpId: res.ok.storyProtocolIpId ?? `manual-ipa-${now}`,
+                        icpCanisterId: res.ok.icpCanisterId ?? "aaaaa-aa",
+                        case: { id: selectedCaseId, caseNumber: selectedCase?.caseNumber || selectedCaseId },
+                        collectedBy: { id: user?.id || '', name: user?.name || 'Unknown', badgeNumber: user?.badgeNumber || 'N/A' },
+                        custodyLogs: Array.isArray((res.ok as any).custodyLogs) ? (res.ok as any).custodyLogs : [],
+                      }
+                      const dedup = [...stored.filter(e => e.id !== toStore.id), toStore]
+                      window.localStorage.setItem('lv_mock_evidence', JSON.stringify(dedup))
+                    }
+                  } catch {}
+                  // Reset form
+                  setItemNumber("")
+                  setEvidenceTypeKey("")
+                  setDescription("")
+                  setLocation("")
+                } else {
+                  toast({ title: "Failed to log evidence", description: res.err, variant: "destructive" })
+                }
+              } catch (err: any) {
+                toast({ title: "Error", description: String(err?.message || err), variant: "destructive" })
+              } finally {
+                setAddingEvidence(false)
+              }
+            }}
+            disabled={addingEvidence}
+          >
+            {addingEvidence ? "Adding…" : "Add Evidence"}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Dialog open={detailsOpen} onOpenChange={(o) => { setDetailsOpen(o); if (!o) { setDetailsId(null); setDetails(null); setDetailsError(null); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Evidence Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {detailsLoading && (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            )}
+            {detailsError && (
+              <div className="text-sm text-destructive bg-destructive/10 p-2 rounded">{detailsError}</div>
+            )}
+            {!detailsLoading && !detailsError && details && (
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Evidence ID</div>
+                    <div className="font-medium break-all">{details.id}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Case ID</div>
+                    <div className="font-medium break-all">{details.caseId}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Item Number</div>
+                    <div className="font-medium">{details.itemNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Type</div>
+                    <div className="font-medium">{typeof details.evidenceType === 'object' ? Object.keys(details.evidenceType)[0] : String(details.evidenceType)}</div>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs text-muted-foreground">Description</div>
+                    <div className="font-medium">{details.description}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Collected At</div>
+                    <div className="font-medium">{typeof details.collectedAt === 'bigint' ? new Date(Number(details.collectedAt)).toLocaleString() : String(details.collectedAt)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Location</div>
+                    <div className="font-medium">{details.location}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Initial Hash</div>
+                    <div className="font-medium break-all">{details.initialHash}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Story Protocol IP</div>
+                    <div className="font-medium break-all">{details.storyProtocolIpId}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">ICP Canister</div>
+                    <div className="font-medium break-all">{details.icpCanisterId}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
