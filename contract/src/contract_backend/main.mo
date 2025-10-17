@@ -5,9 +5,9 @@
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Nat "mo:base/Nat";
-import Array "mo:base/Array";
 import Buffer "mo:base/Buffer";
 import Text "mo:base/Text";
+import Trie "mo:base/Trie";
 
 persistent actor class LexVeritas() {
 
@@ -68,32 +68,38 @@ persistent actor class LexVeritas() {
   };
 
   // --- STATE (The Canister's Database) ---
-  // We use simple arrays to store our data. This is like having database tables
-  // that live securely on the blockchain and persist across upgrades.
+  // Stable, upgrade-safe persistent data structures.
+  // We use immutable tries which are stable across upgrades when declared as `stable var`.
 
-  private var users: [User] = [];
-  private var cases: [Case] = [];
-  private var evidenceItems: [EvidenceItem] = [];
-  private var caseToEvidenceIndex: [(CaseId, [EvidenceId])] = [];
+  private var users: Trie.Trie<UserId, User> = Trie.empty();
+  private var cases: Trie.Trie<CaseId, Case> = Trie.empty();
+  private var evidenceItems: Trie.Trie<EvidenceId, EvidenceItem> = Trie.empty();
+  private var caseToEvidenceIndex: Trie.Trie<CaseId, [EvidenceId]> = Trie.empty();
+
+  // Helpers to construct Trie keys
+  private func pKey(p: Principal): Trie.Key<Principal> {
+    { key = p; hash = Principal.hash(p) }
+  };
+
+  private func tKey(t: Text): Trie.Key<Text> {
+    { key = t; hash = Text.hash(t) }
+  };
 
   // Helper functions for array operations
   private func findUser(userId: UserId): ?User {
-    Array.find<User>(users, func(u) = u.id == userId)
+    Trie.find<UserId, User>(users, pKey(userId), Principal.equal)
   };
 
   private func findCase(caseId: CaseId): ?Case {
-    Array.find<Case>(cases, func(c) = c.id == caseId)
+    Trie.find<CaseId, Case>(cases, tKey(caseId), Text.equal)
   };
 
   private func findEvidenceItem(evidenceId: EvidenceId): ?EvidenceItem {
-    Array.find<EvidenceItem>(evidenceItems, func(e) = e.id == evidenceId)
+    Trie.find<EvidenceId, EvidenceItem>(evidenceItems, tKey(evidenceId), Text.equal)
   };
 
   private func findCaseEvidence(caseId: CaseId): ?[EvidenceId] {
-    switch(Array.find<(CaseId, [EvidenceId])>(caseToEvidenceIndex, func((id, _)) = id == caseId)) {
-      case null { null };
-      case (?(_, evidence)) { ?evidence };
-    }
+    Trie.find<CaseId, [EvidenceId]>(caseToEvidenceIndex, tKey(caseId), Text.equal)
   };
 
   // --- PUBLIC UPDATE FUNCTIONS (API endpoints that modify data) ---
@@ -115,7 +121,8 @@ persistent actor class LexVeritas() {
       createdAt = Time.now();
     };
 
-    users := Array.append<User>(users, [newUser]);
+    // Insert into users map
+    users := Trie.put<UserId, User>(users, pKey(callerId), Principal.equal, newUser).0;
     return #ok(newUser);
   };
 
@@ -135,8 +142,8 @@ persistent actor class LexVeritas() {
       createdAt = Time.now();
     };
 
-    cases := Array.append<Case>(cases, [newCase]);
-    caseToEvidenceIndex := Array.append<(CaseId, [EvidenceId])>(caseToEvidenceIndex, [(caseId, [])]);
+    cases := Trie.put<CaseId, Case>(cases, tKey(caseId), Text.equal, newCase).0;
+    caseToEvidenceIndex := Trie.put<CaseId, [EvidenceId]>(caseToEvidenceIndex, tKey(caseId), Text.equal, []).0;
     return #ok(newCase);
   };
 
@@ -193,21 +200,19 @@ persistent actor class LexVeritas() {
       custodyLogs = [collectionLog];
     };
 
-    evidenceItems := Array.append<EvidenceItem>(evidenceItems, [newEvidenceItem]);
+    // Insert evidence item into map
+    evidenceItems := Trie.put<EvidenceId, EvidenceItem>(evidenceItems, tKey(evidenceId), Text.equal, newEvidenceItem).0;
 
     // Update the case index to include this new evidence item.
     switch(findCaseEvidence(caseId)) {
-      case null { 
-        caseToEvidenceIndex := Array.append<(CaseId, [EvidenceId])>(caseToEvidenceIndex, [(caseId, [evidenceId])]);
+      case null {
+        caseToEvidenceIndex := Trie.put<CaseId, [EvidenceId]>(caseToEvidenceIndex, tKey(caseId), Text.equal, [evidenceId]).0;
       };
       case (?existingList) {
         let buffer = Buffer.fromArray<EvidenceId>(existingList);
         buffer.add(evidenceId);
         let newList = Buffer.toArray(buffer);
-        // Update the existing entry
-        caseToEvidenceIndex := Array.map<(CaseId, [EvidenceId]), (CaseId, [EvidenceId])>(caseToEvidenceIndex, func((id, evidence)) = 
-          if (id == caseId) { (id, newList) } else { (id, evidence) }
-        );
+        caseToEvidenceIndex := Trie.put<CaseId, [EvidenceId]>(caseToEvidenceIndex, tKey(caseId), Text.equal, newList).0;
       };
     };
 
@@ -251,10 +256,8 @@ persistent actor class LexVeritas() {
           icpCanisterId = item.icpCanisterId;
           custodyLogs = Buffer.toArray(buffer);
         };
-        // Update the evidence item in the array
-        evidenceItems := Array.map<EvidenceItem, EvidenceItem>(evidenceItems, func(e) = 
-          if (e.id == evidenceId) { updatedItem } else { e }
-        );
+        // Update the evidence item in the map
+        evidenceItems := Trie.put<EvidenceId, EvidenceItem>(evidenceItems, tKey(evidenceId), Text.equal, updatedItem).0;
         return #ok(());
       };
     };
