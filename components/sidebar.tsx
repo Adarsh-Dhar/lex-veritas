@@ -31,16 +31,6 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
           </Button>
         )}
 
-        {hasPermission("view_evidence") && (
-          <Button
-            variant={currentView === "lifecycle" ? "default" : "ghost"}
-            className="w-full justify-start"
-            onClick={() => onViewChange("lifecycle")}
-          >
-            <FileText className="w-4 h-4 mr-2" />
-            Evidence Lifecycle
-          </Button>
-        )}
 
         {hasPermission("view_case") && (
           <>

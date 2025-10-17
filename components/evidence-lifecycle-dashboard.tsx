@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Search, ArrowRight, FileText, RefreshCw } from "lucide-react"
 import ChainOfCustodyView from "./chain-of-custody-view"
 import TransferCustodyForm from "./transfer-custody-form"
@@ -57,6 +58,9 @@ export default function EvidenceLifecycleDashboard() {
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showCaseDialog, setShowCaseDialog] = useState(false)
+  const [selectedCaseNumber, setSelectedCaseNumber] = useState<string | null>(null)
+  const [prefillEvidenceId, setPrefillEvidenceId] = useState<string | null>(null)
 
   // Fetch evidence items from canister
   const fetchEvidenceItems = async () => {
@@ -67,26 +71,64 @@ export default function EvidenceLifecycleDashboard() {
       // Get all known cases
       const cases = await listCases()
       if (cases.length === 0) {
+        // Dev/mock fallback: try to load all evidence directly from local storage
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = window.localStorage.getItem('lv_mock_evidence')
+            if (raw) {
+              const list = JSON.parse(raw) as any[]
+              const mapped: EvidenceItem[] = list.map((found: any) => ({
+                id: found.id,
+                itemNumber: found.itemNumber,
+                evidenceType: String(found.evidenceType || 'OTHER'),
+                description: found.description,
+                collectedAt: found.collectedAt || new Date().toISOString(),
+                location: found.location,
+                initialHash: found.initialHash,
+                storyProtocolIpId: found.storyProtocolIpId,
+                icpCanisterId: found.icpCanisterId,
+                case: {
+                  id: found.case?.id || '',
+                  caseNumber: found.case?.caseNumber || 'UNKNOWN-CASE',
+                },
+                collectedBy: {
+                  id: found.collectedBy?.id || '',
+                  name: found.collectedBy?.name || 'Unknown',
+                  badgeNumber: found.collectedBy?.badgeNumber || 'N/A',
+                },
+                custodyLogs: Array.isArray(found.custodyLogs) ? found.custodyLogs.map((log: any) => ({
+                  id: log.id,
+                  action: String(log.action || 'UNKNOWN'),
+                  timestamp: log.timestamp || new Date().toISOString(),
+                  notes: log.notes ?? null,
+                  fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
+                  toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
+                })) : [],
+              }))
+              setEvidenceItems(mapped)
+              return
+            }
+          }
+        } catch {}
         setEvidenceItems([])
         return
       }
 
       const allEvidence: EvidenceItem[] = []
 
-      // Helper: local fallback resolver
-      const resolveLocalEvidence = (evidenceId: string, caseNumber: string) => {
+      // Helper: local fallback resolver (returns ALL matches for an ID variant)
+      const resolveLocalEvidenceAll = (evidenceId: string, caseNumber: string) => {
         try {
           if (typeof window === 'undefined') return null
           const raw = window.localStorage.getItem('lv_mock_evidence')
           if (!raw) return null
           const list = JSON.parse(raw) as any[]
-          const byExact = list.find(e => e.id === evidenceId)
-          const byComposite = list.find(e => `CASE-${e?.case?.id}-${e?.itemNumber}` === evidenceId)
-          const byShort = list.find(e => `${e?.case?.caseNumber}-${e?.itemNumber}` === evidenceId)
-          const found = byExact || byComposite || byShort
-          if (!found) return null
-          const item = {
-            id: found.id,
+          const matches = list.filter(e => (
+            e.id === evidenceId || `CASE-${e?.case?.id}-${e?.itemNumber}` === evidenceId || `${e?.case?.caseNumber}-${e?.itemNumber}` === evidenceId
+          ))
+          if (!matches.length) return null
+          const mapped: EvidenceItem[] = matches.map((found: any) => ({
+            id: found.id || `CASE-${found?.case?.id}-${found?.itemNumber}`,
             itemNumber: found.itemNumber,
             evidenceType: String(found.evidenceType || 'OTHER'),
             description: found.description,
@@ -112,8 +154,8 @@ export default function EvidenceLifecycleDashboard() {
               fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
               toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
             })) : [],
-          } as EvidenceItem
-          return item
+          }))
+          return mapped
         } catch {
           return null
         }
@@ -128,39 +170,72 @@ export default function EvidenceLifecycleDashboard() {
             for (const evidenceId of evidenceIds) {
               try {
                 const evidenceDetails = await getEvidenceHistory(evidenceId)
-                const fromLocal = evidenceDetails ? null : resolveLocalEvidence(evidenceId, caseItem.caseNumber)
-                const resolved = (evidenceDetails || fromLocal) as any
-                if (resolved) {
-                  // Transform the contract data to match our UI interface
-                  const evidenceItem: EvidenceItem = {
-                    id: resolved.id,
-                    itemNumber: resolved.itemNumber,
-                    evidenceType: typeof resolved.evidenceType === 'object' ? (Object.keys(resolved.evidenceType)[0] || 'OTHER') : String(resolved.evidenceType || 'OTHER'),
-                    description: resolved.description,
-                    collectedAt: typeof resolved.collectedAt === 'bigint' ? new Date(Number(resolved.collectedAt)).toISOString() : (resolved.collectedAt as any),
-                    location: resolved.location,
-                    initialHash: resolved.initialHash,
-                    storyProtocolIpId: resolved.storyProtocolIpId,
-                    icpCanisterId: resolved.icpCanisterId,
-                    case: {
-                      id: (resolved.case && resolved.case.id) ? resolved.case.id : caseItem.id,
-                      caseNumber: (resolved.case && resolved.case.caseNumber) ? resolved.case.caseNumber : caseItem.caseNumber,
-                    },
-                    collectedBy: {
-                      id: resolved.collectedById || (resolved.collectedBy && resolved.collectedBy.id) || '',
-                      name: (resolved.collectedBy && resolved.collectedBy.name) ? resolved.collectedBy.name : "Unknown",
-                      badgeNumber: (resolved.collectedBy && resolved.collectedBy.badgeNumber) ? resolved.collectedBy.badgeNumber : "N/A",
-                    },
-                    custodyLogs: Array.isArray(resolved.custodyLogs) ? resolved.custodyLogs.map((log: any) => ({
-                      id: log.id,
-                      action: typeof log.action === 'object' ? (Object.keys(log.action)[0] || 'UNKNOWN') : String(log.action || 'UNKNOWN'),
-                      timestamp: typeof log.timestamp === 'bigint' ? new Date(Number(log.timestamp)).toISOString() : (log.timestamp || new Date().toISOString()),
-                      notes: log.notes ?? null,
-                      fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
-                      toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
-                    })) : [],
+                const fromLocalAll = evidenceDetails ? null : resolveLocalEvidenceAll(evidenceId, caseItem.caseNumber)
+                if (fromLocalAll && Array.isArray(fromLocalAll)) {
+                  for (const resolved of fromLocalAll) {
+                    const evidenceItem: EvidenceItem = {
+                      id: resolved.id,
+                      itemNumber: resolved.itemNumber,
+                      evidenceType: typeof resolved.evidenceType === 'object' ? (Object.keys(resolved.evidenceType)[0] || 'OTHER') : String(resolved.evidenceType || 'OTHER'),
+                      description: resolved.description,
+                      collectedAt: typeof resolved.collectedAt === 'bigint' ? new Date(Number(resolved.collectedAt)).toISOString() : (resolved.collectedAt as any),
+                      location: resolved.location,
+                      initialHash: resolved.initialHash,
+                      storyProtocolIpId: resolved.storyProtocolIpId,
+                      icpCanisterId: resolved.icpCanisterId,
+                      case: {
+                        id: (resolved.case && resolved.case.id) ? resolved.case.id : caseItem.id,
+                        caseNumber: (resolved.case && resolved.case.caseNumber) ? resolved.case.caseNumber : caseItem.caseNumber,
+                      },
+                      collectedBy: {
+                        id: (resolved.collectedBy && resolved.collectedBy.id) || '',
+                        name: (resolved.collectedBy && resolved.collectedBy.name) ? resolved.collectedBy.name : "Unknown",
+                        badgeNumber: (resolved.collectedBy && resolved.collectedBy.badgeNumber) ? resolved.collectedBy.badgeNumber : "N/A",
+                      },
+                      custodyLogs: Array.isArray(resolved.custodyLogs) ? resolved.custodyLogs.map((log: any) => ({
+                        id: log.id,
+                        action: typeof log.action === 'object' ? (Object.keys(log.action)[0] || 'UNKNOWN') : String(log.action || 'UNKNOWN'),
+                        timestamp: typeof log.timestamp === 'bigint' ? new Date(Number(log.timestamp)).toISOString() : (log.timestamp || new Date().toISOString()),
+                        notes: log.notes ?? null,
+                        fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
+                        toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
+                      })) : [],
+                    }
+                    allEvidence.push(evidenceItem)
                   }
-                  allEvidence.push(evidenceItem)
+                } else {
+                  const resolved = (evidenceDetails || fromLocalAll) as any
+                  if (resolved) {
+                    const evidenceItem: EvidenceItem = {
+                      id: resolved.id,
+                      itemNumber: resolved.itemNumber,
+                      evidenceType: typeof resolved.evidenceType === 'object' ? (Object.keys(resolved.evidenceType)[0] || 'OTHER') : String(resolved.evidenceType || 'OTHER'),
+                      description: resolved.description,
+                      collectedAt: typeof resolved.collectedAt === 'bigint' ? new Date(Number(resolved.collectedAt)).toISOString() : (resolved.collectedAt as any),
+                      location: resolved.location,
+                      initialHash: resolved.initialHash,
+                      storyProtocolIpId: resolved.storyProtocolIpId,
+                      icpCanisterId: resolved.icpCanisterId,
+                      case: {
+                        id: (resolved.case && resolved.case.id) ? resolved.case.id : caseItem.id,
+                        caseNumber: (resolved.case && resolved.case.caseNumber) ? resolved.case.caseNumber : caseItem.caseNumber,
+                      },
+                      collectedBy: {
+                        id: (resolved.collectedBy && resolved.collectedBy.id) || '',
+                        name: (resolved.collectedBy && resolved.collectedBy.name) ? resolved.collectedBy.name : "Unknown",
+                        badgeNumber: (resolved.collectedBy && resolved.collectedBy.badgeNumber) ? resolved.collectedBy.badgeNumber : "N/A",
+                      },
+                      custodyLogs: Array.isArray(resolved.custodyLogs) ? resolved.custodyLogs.map((log: any) => ({
+                        id: log.id,
+                        action: typeof log.action === 'object' ? (Object.keys(log.action)[0] || 'UNKNOWN') : String(log.action || 'UNKNOWN'),
+                        timestamp: typeof log.timestamp === 'bigint' ? new Date(Number(log.timestamp)).toISOString() : (log.timestamp || new Date().toISOString()),
+                        notes: log.notes ?? null,
+                        fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
+                        toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
+                      })) : [],
+                    }
+                    allEvidence.push(evidenceItem)
+                  }
                 }
               } catch (evidenceErr) {
                 // Swallow per-item errors in dev to avoid noisy logs
@@ -171,6 +246,135 @@ export default function EvidenceLifecycleDashboard() {
           // Swallow per-case errors in dev
         }
       }
+
+      // Additional fallback: if we still have no evidence from cases, try known evidence id map in localStorage
+      if (allEvidence.length === 0) {
+        try {
+          if (typeof window !== 'undefined') {
+            const mapRaw = window.localStorage.getItem('lv_case_evidence_ids')
+            if (mapRaw) {
+              const map = JSON.parse(mapRaw) as Record<string, string[]>
+              const ids = new Set<string>()
+              Object.values(map).forEach(arr => Array.isArray(arr) && arr.forEach(id => ids.add(id)))
+              for (const evidenceId of ids) {
+                try {
+                  const evidenceDetails = await getEvidenceHistory(evidenceId)
+                  const fromLocalAll = evidenceDetails ? null : resolveLocalEvidenceAll(evidenceId, 'UNKNOWN-CASE')
+                  if (fromLocalAll && Array.isArray(fromLocalAll)) {
+                    for (const resolved of fromLocalAll) {
+                      const evidenceItem: EvidenceItem = {
+                        id: resolved.id,
+                        itemNumber: resolved.itemNumber,
+                        evidenceType: typeof resolved.evidenceType === 'object' ? (Object.keys(resolved.evidenceType)[0] || 'OTHER') : String(resolved.evidenceType || 'OTHER'),
+                        description: resolved.description,
+                        collectedAt: typeof resolved.collectedAt === 'bigint' ? new Date(Number(resolved.collectedAt)).toISOString() : (resolved.collectedAt as any),
+                        location: resolved.location,
+                        initialHash: resolved.initialHash,
+                        storyProtocolIpId: resolved.storyProtocolIpId,
+                        icpCanisterId: resolved.icpCanisterId,
+                        case: {
+                          id: (resolved.case && resolved.case.id) ? resolved.case.id : '',
+                          caseNumber: (resolved.case && resolved.case.caseNumber) ? resolved.case.caseNumber : 'UNKNOWN-CASE',
+                        },
+                        collectedBy: {
+                          id: (resolved.collectedBy && resolved.collectedBy.id) || '',
+                          name: (resolved.collectedBy && resolved.collectedBy.name) ? resolved.collectedBy.name : "Unknown",
+                          badgeNumber: (resolved.collectedBy && resolved.collectedBy.badgeNumber) ? resolved.collectedBy.badgeNumber : "N/A",
+                        },
+                        custodyLogs: Array.isArray(resolved.custodyLogs) ? resolved.custodyLogs.map((log: any) => ({
+                          id: log.id,
+                          action: typeof log.action === 'object' ? (Object.keys(log.action)[0] || 'UNKNOWN') : String(log.action || 'UNKNOWN'),
+                          timestamp: typeof log.timestamp === 'bigint' ? new Date(Number(log.timestamp)).toISOString() : (log.timestamp || new Date().toISOString()),
+                          notes: log.notes ?? null,
+                          fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
+                          toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
+                        })) : [],
+                      }
+                      allEvidence.push(evidenceItem)
+                    }
+                  } else {
+                    const resolved = (evidenceDetails || fromLocalAll) as any
+                    if (resolved) {
+                      const evidenceItem: EvidenceItem = {
+                        id: resolved.id,
+                        itemNumber: resolved.itemNumber,
+                        evidenceType: typeof resolved.evidenceType === 'object' ? (Object.keys(resolved.evidenceType)[0] || 'OTHER') : String(resolved.evidenceType || 'OTHER'),
+                        description: resolved.description,
+                        collectedAt: typeof resolved.collectedAt === 'bigint' ? new Date(Number(resolved.collectedAt)).toISOString() : (resolved.collectedAt as any),
+                        location: resolved.location,
+                        initialHash: resolved.initialHash,
+                        storyProtocolIpId: resolved.storyProtocolIpId,
+                        icpCanisterId: resolved.icpCanisterId,
+                        case: {
+                          id: (resolved.case && resolved.case.id) ? resolved.case.id : '',
+                          caseNumber: (resolved.case && resolved.case.caseNumber) ? resolved.case.caseNumber : 'UNKNOWN-CASE',
+                        },
+                        collectedBy: {
+                          id: (resolved.collectedBy && resolved.collectedBy.id) || '',
+                          name: (resolved.collectedBy && resolved.collectedBy.name) ? resolved.collectedBy.name : "Unknown",
+                          badgeNumber: (resolved.collectedBy && resolved.collectedBy.badgeNumber) ? resolved.collectedBy.badgeNumber : "N/A",
+                        },
+                        custodyLogs: Array.isArray(resolved.custodyLogs) ? resolved.custodyLogs.map((log: any) => ({
+                          id: log.id,
+                          action: typeof log.action === 'object' ? (Object.keys(log.action)[0] || 'UNKNOWN') : String(log.action || 'UNKNOWN'),
+                          timestamp: typeof log.timestamp === 'bigint' ? new Date(Number(log.timestamp)).toISOString() : (log.timestamp || new Date().toISOString()),
+                          notes: log.notes ?? null,
+                          fromUser: { name: log.fromUser?.name || 'Unknown', badgeNumber: log.fromUser?.badgeNumber || 'N/A' },
+                          toUser: log.toUser ? { name: log.toUser?.name || 'Unknown', badgeNumber: log.toUser?.badgeNumber || 'N/A' } : null,
+                        })) : [],
+                      }
+                      allEvidence.push(evidenceItem)
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // After collecting from canister per-case, also merge in any local/mock evidence (no dedupe: show all)
+      try {
+        if (typeof window !== 'undefined') {
+          const raw = window.localStorage.getItem('lv_mock_evidence')
+          if (raw) {
+            const list = JSON.parse(raw) as any[]
+            for (const found of list) {
+              if (!found) continue
+              const candidateId = String(found.id || `CASE-${found?.case?.id}-${found?.itemNumber}`)
+              const item: EvidenceItem = {
+                id: candidateId,
+                itemNumber: String(found.itemNumber || ''),
+                evidenceType: String(found.evidenceType || 'OTHER'),
+                description: String(found.description || ''),
+                collectedAt: found.collectedAt || new Date().toISOString(),
+                location: String(found.location || ''),
+                initialHash: String(found.initialHash || ''),
+                storyProtocolIpId: String(found.storyProtocolIpId || ''),
+                icpCanisterId: String(found.icpCanisterId || ''),
+                case: {
+                  id: String(found?.case?.id || ''),
+                  caseNumber: String(found?.case?.caseNumber || 'UNKNOWN-CASE'),
+                },
+                collectedBy: {
+                  id: String(found?.collectedBy?.id || ''),
+                  name: String(found?.collectedBy?.name || 'Unknown'),
+                  badgeNumber: String(found?.collectedBy?.badgeNumber || 'N/A'),
+                },
+                custodyLogs: Array.isArray(found.custodyLogs) ? found.custodyLogs.map((log: any) => ({
+                  id: String(log.id || ''),
+                  action: String(log.action || 'UNKNOWN'),
+                  timestamp: log.timestamp || new Date().toISOString(),
+                  notes: log.notes ?? null,
+                  fromUser: { name: String(log?.fromUser?.name || 'Unknown'), badgeNumber: String(log?.fromUser?.badgeNumber || 'N/A') },
+                  toUser: log?.toUser ? { name: String(log?.toUser?.name || 'Unknown'), badgeNumber: String(log?.toUser?.badgeNumber || 'N/A') } : null,
+                })) : [],
+              }
+              allEvidence.push(item)
+            }
+          }
+        }
+      } catch {}
 
       setEvidenceItems(allEvidence)
     } catch (err) {
@@ -266,9 +470,8 @@ export default function EvidenceLifecycleDashboard() {
                 <div className="space-y-3">
                   {filteredEvidence.map((item) => (
                     <Card
-                      key={item.id}
-                      className="p-4 cursor-pointer hover:bg-input/50 transition-colors border-border/50"
-                      onClick={() => setSelectedEvidence(item)}
+                      key={`${item.case.caseNumber}-${item.itemNumber}-${item.id}`}
+                      className="p-4 hover:bg-input/50 transition-colors border-border/50"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -285,7 +488,31 @@ export default function EvidenceLifecycleDashboard() {
                             <span>By: {item.collectedBy.name} ({item.collectedBy.badgeNumber})</span>
                           </div>
                         </div>
-                        <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedCaseNumber(item.case.caseNumber)
+                              setShowCaseDialog(true)
+                            }}
+                            className="gap-2"
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                            Details
+                          </Button>
+                          {hasPermission("transfer_custody") && (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setPrefillEvidenceId(item.id)
+                                setActiveTab("transfer")
+                              }}
+                            >
+                              Transfer Custody
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </Card>
                   ))}
@@ -301,11 +528,58 @@ export default function EvidenceLifecycleDashboard() {
           {selectedEvidence && (
             <ChainOfCustodyView evidence={selectedEvidence} onClose={() => setSelectedEvidence(null)} />
           )}
+
+          <Dialog open={showCaseDialog} onOpenChange={setShowCaseDialog}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Evidence for Case {selectedCaseNumber}</DialogTitle>
+                <DialogDescription>Select an item to view its chain of custody</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                {evidenceItems.filter(e => e.case.caseNumber === selectedCaseNumber).map((ev) => (
+                  <Card key={`${ev.case.caseNumber}-${ev.itemNumber}-${ev.id}`} className="p-4 flex items-center justify-between border-border/50">
+                    <div>
+                      <p className="font-semibold text-foreground">Item #{ev.itemNumber}</p>
+                      <p className="text-sm text-muted-foreground">{ev.description}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Type: {ev.evidenceType} | Collected: {new Date(ev.collectedAt).toLocaleString()}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => {
+                          setSelectedEvidence(ev)
+                          setShowCaseDialog(false)
+                        }}
+                      >
+                        <ArrowRight className="h-4 w-4" />
+                        View Chain
+                      </Button>
+                      {hasPermission("transfer_custody") && (
+                        <Button
+                          onClick={() => {
+                            setShowCaseDialog(false)
+                            setPrefillEvidenceId(ev.id)
+                            setActiveTab("transfer")
+                          }}
+                        >
+                          Transfer Custody
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+                {evidenceItems.filter(e => e.case.caseNumber === selectedCaseNumber).length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">No evidence found for this case.</div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {hasPermission("transfer_custody") && (
           <TabsContent value="transfer">
-            <TransferCustodyForm evidence={filteredEvidence} />
+            <TransferCustodyForm evidence={filteredEvidence} initialEvidenceId={prefillEvidenceId || undefined} />
           </TabsContent>
         )}
 

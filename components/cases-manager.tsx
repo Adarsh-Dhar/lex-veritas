@@ -9,7 +9,8 @@ import { useToast } from "@/components/ui/use-toast"
 import { createCase, getCaseEvidence, getContractConfig, logEvidence, EvidenceTypeEnum, getEvidenceHistory } from "@/lib/contract"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth-context"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import TransferCustodyForm from "@/components/transfer-custody-form"
 
 type CaseSummary = {
   id: string
@@ -30,6 +31,7 @@ export default function CasesManager(): ReactElement {
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [details, setDetails] = useState<any | null>(null)
+  const [transferOpen, setTransferOpen] = useState(false)
 
   // Add Evidence form state
   const [selectedCaseId, setSelectedCaseId] = useState("")
@@ -199,8 +201,8 @@ export default function CasesManager(): ReactElement {
             <div>
               <Label>Evidence IDs</Label>
               <ul className="mt-2 rounded-md border border-border divide-y divide-border">
-                {evidenceIds.map((id) => (
-                  <li key={id} className="p-3 text-sm flex items-center justify-between gap-3">
+                {evidenceIds.map((id, idx) => (
+                  <li key={`${lookupCaseId}-${id}-${idx}`} className="p-3 text-sm flex items-center justify-between gap-3">
                     <span className="truncate">{id}</span>
                     <Button
                       size="sm"
@@ -357,6 +359,7 @@ export default function CasesManager(): ReactElement {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Evidence Details</DialogTitle>
+            <DialogDescription>View immutable evidence metadata and identifiers.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {detailsLoading && (
@@ -409,9 +412,39 @@ export default function CasesManager(): ReactElement {
                     <div className="font-medium break-all">{details.icpCanisterId}</div>
                   </div>
                 </div>
+                <div className="pt-3">
+                  <Button
+                    className="w-full"
+                    onClick={() => setTransferOpen(true)}
+                  >
+                    Transfer Custody
+                  </Button>
+                </div>
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Custody nested dialog */}
+      <Dialog open={transferOpen} onOpenChange={(o) => setTransferOpen(o)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Log Custody Transfer</DialogTitle>
+            <DialogDescription>Record the transfer for this evidence item.</DialogDescription>
+          </DialogHeader>
+          {details && (
+            <TransferCustodyForm
+              evidence={[{
+                id: String(details.id || detailsId || ""),
+                itemNumber: String(details.itemNumber || ""),
+                evidenceType: typeof details.evidenceType === 'object' ? Object.keys(details.evidenceType)[0] : String(details.evidenceType || ""),
+                description: String(details.description || ""),
+                case: { id: String(details.caseId || ""), caseNumber: String(details.caseId || "") },
+              }]}
+              initialEvidenceId={String(details.id || detailsId || "")}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

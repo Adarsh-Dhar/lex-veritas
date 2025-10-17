@@ -2,10 +2,11 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
@@ -24,15 +25,23 @@ interface EvidenceItem {
 
 interface TransferCustodyFormProps {
   evidence: EvidenceItem[]
+  initialEvidenceId?: string
 }
 
-export default function TransferCustodyForm({ evidence }: TransferCustodyFormProps) {
+export default function TransferCustodyForm({ evidence, initialEvidenceId }: TransferCustodyFormProps) {
   const [selectedEvidence, setSelectedEvidence] = useState("")
   const [receivingParty, setReceivingParty] = useState("")
   const [notes, setNotes] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState("")
+
+  // Preselect when provided by parent
+  useEffect(() => {
+    if (initialEvidenceId) {
+      setSelectedEvidence(initialEvidenceId)
+    }
+  }, [initialEvidenceId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -109,19 +118,15 @@ export default function TransferCustodyForm({ evidence }: TransferCustodyFormPro
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-2">Receiving Party</label>
-            <Select value={receivingParty} onValueChange={setReceivingParty}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select receiving party" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="prosecutor">Prosecutor</SelectItem>
-                <SelectItem value="forensic_lab">Forensic Lab</SelectItem>
-                <SelectItem value="evidence_room">Evidence Room Storage</SelectItem>
-                <SelectItem value="court">Court Clerk</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+            <label className="block text-sm font-medium text-foreground mb-2">Receiving Principal ID</label>
+            <Input
+              placeholder="e.g. w7x7r-cok77-xa (Principal of recipient)"
+              value={receivingParty}
+              onChange={(e) => setReceivingParty(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-2">
+              Enter the Internet Computer Principal of the receiving party.
+            </p>
           </div>
 
           <div>
