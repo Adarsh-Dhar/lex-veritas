@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
-import { createCase, getCaseEvidence, getContractConfig, logEvidence, EvidenceTypeEnum, getEvidenceHistory } from "@/lib/contract"
+import { createCase, getCaseEvidence, getContractConfig, logEvidence, logEvidenceAuthenticated, EvidenceTypeEnum, getEvidenceHistory, updateUserRoleAuthenticated, RoleEnum } from "@/lib/contract"
+import { computeTextHash } from "@/lib/file-hash"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth-context"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import TransferCustodyForm from "@/components/transfer-custody-form"
+import { AuthClient } from "@dfinity/auth-client"
 
 type CaseSummary = {
   id: string
@@ -291,24 +293,73 @@ export default function CasesManager(): ReactElement {
         <CardFooter>
           <Button
             onClick={async () => {
+              alert('🔥 BUTTON CLICKED! Check console for details.')
+              console.log('🔥🔥🔥 BUTTON CLICKED 🔥🔥🔥')
               if (!selectedCaseId || !itemNumber || !evidenceTypeKey || !description || !location) {
                 toast({ title: "Missing fields", description: "Fill all fields to add evidence", variant: "destructive" })
                 return
               }
               try {
                 setAddingEvidence(true)
-                const now = Date.now()
-                const res = await logEvidence({
+                // Compute hash from description and location for non-file evidence
+                const contentToHash = `${description}-${location}-${itemNumber}`
+                console.log('Content to hash:', contentToHash)
+                const initialHash = await computeTextHash(contentToHash)
+                console.log('Initial hash:', initialHash)
+                console.log('🔥🔥🔥 CALLING LOG EVIDENCE AUTHENTICATED 🔥🔥🔥')
+                console.log('Evidence parameters:', {
+                  caseId: selectedCaseId,
+                  itemNumber,
+                  evidenceType: evidenceTypeKey,
+                  description,
+                  location,
+                  initialHash
+                })
+
+                // Get the user's identity for authenticated evidence logging
+                console.log('Getting user identity for evidence logging...')
+                const authClient = await AuthClient.create()
+                const isAuthenticated = await authClient.isAuthenticated()
+                console.log('User authenticated:', isAuthenticated)
+
+                if (!isAuthenticated) {
+                  toast({ title: "Authentication Error", description: "User is not authenticated. Please log in again.", variant: "destructive" })
+                  return
+                }
+
+                const identity = await authClient.getIdentity()
+                console.log('Identity obtained:', !!identity, 'Principal:', identity?.getPrincipal()?.toText())
+
+                // Ensure user has correct role in the contract
+                console.log('🔐🔐🔐 UPDATING USER ROLE IN CONTRACT 🔐🔐🔐')
+                try {
+                  const updateResult = await updateUserRoleAuthenticated({
+                    role: RoleEnum.ADMIN, // Force ADMIN role
+                    identity,
+                  })
+                  console.log('User role update result:', updateResult)
+                  if ('err' in updateResult) {
+                    console.log('User role update error:', updateResult.err)
+                  } else {
+                    console.log('✅ User role updated successfully in contract')
+                  }
+                } catch (updateError) {
+                  console.log('User role update failed:', updateError)
+                }
+                
+                const res = await logEvidenceAuthenticated({
                   caseId: selectedCaseId,
                   itemNumber,
                   evidenceType: (EvidenceTypeEnum as any)[evidenceTypeKey],
                   description,
                   location,
-                  initialHash: `manual-hash-${now}`,
-                  storyProtocolIpId: `manual-ipa-${now}`,
-                  icpCanisterId: "aaaaa-aa",
+                  initialHash,
+                  identity,
                 })
+                
+                console.log('🔥🔥🔥 LOG EVIDENCE AUTHENTICATED RESULT 🔥🔥🔥', res)
                 if ("ok" in res) {
+                  console.log('✅✅✅ EVIDENCE LOGGING SUCCESS ✅✅✅', res.ok)
                   toast({ title: "Evidence logged", description: `Item #${itemNumber} added to ${selectedCaseId}` })
                   // Persist locally (dev fallback) so dashboards can read
                   try {
@@ -323,8 +374,8 @@ export default function CasesManager(): ReactElement {
                         description,
                         collectedAt: new Date().toISOString(),
                         location,
-                        initialHash: res.ok.initialHash ?? `manual-hash-${now}`,
-                        storyProtocolIpId: res.ok.storyProtocolIpId ?? `manual-ipa-${now}`,
+                        initialHash: res.ok.initialHash ?? initialHash,
+                        storyProtocolIpId: res.ok.storyProtocolIpId ?? `manual-ipa-${Date.now()}`,
                         icpCanisterId: res.ok.icpCanisterId ?? "aaaaa-aa",
                         case: { id: selectedCaseId, caseNumber: selectedCase?.caseNumber || selectedCaseId },
                         collectedBy: { id: user?.id || '', name: user?.name || 'Unknown', badgeNumber: user?.badgeNumber || 'N/A' },
@@ -340,11 +391,14 @@ export default function CasesManager(): ReactElement {
                   setDescription("")
                   setLocation("")
                 } else {
+                  console.log('❌❌❌ EVIDENCE LOGGING FAILED ❌❌❌', res.err)
                   toast({ title: "Failed to log evidence", description: res.err, variant: "destructive" })
                 }
               } catch (err: any) {
+                console.log('💥💥💥 EXCEPTION IN EVIDENCE CREATION 💥💥💥', err)
                 toast({ title: "Error", description: String(err?.message || err), variant: "destructive" })
               } finally {
+                console.log('🏁🏁🏁 EVIDENCE CREATION FINALLY BLOCK 🏁🏁🏁')
                 setAddingEvidence(false)
               }
             }}

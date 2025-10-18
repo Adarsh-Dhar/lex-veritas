@@ -16,7 +16,7 @@ export default function DashboardLayout() {
   const renderView = () => {
     switch (currentView) {
       case "intake":
-        return <IntakeForm onSubmit={() => setCurrentView("lifecycle")} />
+        return <IntakeForm onSubmit={() => setCurrentView("lifecycle")} onNavigateToCases={() => setCurrentView("cases")} />
       case "lifecycle":
         return <EvidenceLifecycleDashboard />
       case "cases":

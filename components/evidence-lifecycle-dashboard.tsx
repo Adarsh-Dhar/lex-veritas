@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Search, ArrowRight, FileText, RefreshCw } from "lucide-react"
+import { Search, ArrowRight, FileText, RefreshCw, ExternalLink } from "lucide-react"
 import ChainOfCustodyView from "./chain-of-custody-view"
 import TransferCustodyForm from "./transfer-custody-form"
 import LogActionForm from "./log-action-form"
@@ -376,7 +376,22 @@ export default function EvidenceLifecycleDashboard() {
         }
       } catch {}
 
-      setEvidenceItems(allEvidence)
+      // Deduplicate evidence items by ID to prevent duplicate keys
+      const uniqueEvidence = allEvidence.reduce((acc, current) => {
+        const existingIndex = acc.findIndex(item => item.id === current.id)
+        if (existingIndex === -1) {
+          acc.push(current)
+        } else {
+          // If duplicate found, prefer the one with more complete data
+          const existing = acc[existingIndex]
+          if (current.storyProtocolIpId && !existing.storyProtocolIpId) {
+            acc[existingIndex] = current
+          }
+        }
+        return acc
+      }, [] as EvidenceItem[])
+
+      setEvidenceItems(uniqueEvidence)
     } catch (err) {
       setError('Failed to fetch evidence items')
       console.error('Error fetching evidence items:', err)
@@ -468,9 +483,9 @@ export default function EvidenceLifecycleDashboard() {
                 </div>
               ) : filteredEvidence.length > 0 ? (
                 <div className="space-y-3">
-                  {filteredEvidence.map((item) => (
+                  {filteredEvidence.map((item, index) => (
                     <Card
-                      key={`${item.case.caseNumber}-${item.itemNumber}-${item.id}`}
+                      key={`evidence-${item.id}-${index}`}
                       className="p-4 hover:bg-input/50 transition-colors border-border/50"
                     >
                       <div className="flex items-start justify-between">
@@ -536,12 +551,25 @@ export default function EvidenceLifecycleDashboard() {
                 <DialogDescription>Select an item to view its chain of custody</DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
-                {evidenceItems.filter(e => e.case.caseNumber === selectedCaseNumber).map((ev) => (
-                  <Card key={`${ev.case.caseNumber}-${ev.itemNumber}-${ev.id}`} className="p-4 flex items-center justify-between border-border/50">
-                    <div>
+                {evidenceItems.filter(e => e.case.caseNumber === selectedCaseNumber).map((ev, index) => (
+                  <Card key={`case-evidence-${ev.id}-${index}`} className="p-4 flex items-center justify-between border-border/50">
+                    <div className="flex-1">
                       <p className="font-semibold text-foreground">Item #{ev.itemNumber}</p>
                       <p className="text-sm text-muted-foreground">{ev.description}</p>
                       <p className="text-xs text-muted-foreground mt-1">Type: {ev.evidenceType} | Collected: {new Date(ev.collectedAt).toLocaleString()}</p>
+                      {ev.storyProtocolIpId && (
+                        <div className="mt-2">
+                          <a 
+                            href={`https://explorer.story.foundation/tx/${ev.storyProtocolIpId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Story Protocol: {ev.storyProtocolIpId.slice(0, 10)}...{ev.storyProtocolIpId.slice(-8)}
+                          </a>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
@@ -603,8 +631,8 @@ export default function EvidenceLifecycleDashboard() {
                   </div>
                 ) : filteredEvidence.length > 0 ? (
                   <div className="space-y-3">
-                    {filteredEvidence.map((item) => (
-                      <Card key={item.id} className="p-4 flex items-center justify-between border-border/50">
+                    {filteredEvidence.map((item, index) => (
+                      <Card key={`report-${item.id}-${index}`} className="p-4 flex items-center justify-between border-border/50">
                         <div>
                           <p className="font-semibold text-foreground">
                             {item.case.caseNumber} - Item #{item.itemNumber}

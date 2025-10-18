@@ -11,10 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar, MapPin, Loader2 } from "lucide-react"
 import FileUploadArea from "./file-upload-area"
 import { useAuth } from "@/lib/auth-context"
-import { EvidenceTypeEnum, logEvidence, listCases, isMockEvidence, getContractConfig, registerUser, RoleEnum } from "@/lib/contract"
+import { EvidenceTypeEnum, logEvidence, logEvidenceAuthenticated, listCases, isMockEvidence, getContractConfig, registerUser, RoleEnum, createCase } from "@/lib/contract"
+import { AuthClient } from "@dfinity/auth-client"
+import { computeFileHash, formatHashForDisplay } from "@/lib/file-hash"
 
 interface IntakeFormProps {
   onSubmit: (data: any) => void
+  onNavigateToCases?: () => void
 }
 
 interface Case {
@@ -27,8 +30,11 @@ interface Case {
   }
 }
 
-export default function IntakeForm({ onSubmit }: IntakeFormProps) {
+export default function IntakeForm({ onSubmit, onNavigateToCases }: IntakeFormProps) {
   const { user } = useAuth()
+  console.log('🚀 INTAKE FORM RENDERED - User:', user)
+  console.log('🚀 INTAKE FORM RENDERED - Props:', { onSubmit: !!onSubmit, onNavigateToCases: !!onNavigateToCases })
+  
   const [formData, setFormData] = useState({
     caseId: "",
     itemNumber: "",
@@ -43,9 +49,76 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
   const [cases, setCases] = useState<Case[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingCases, setIsLoadingCases] = useState(true)
+  const [isCreatingDefaultCase, setIsCreatingDefaultCase] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [evidenceData, setEvidenceData] = useState<any>(null)
+  const [blockchainStatus, setBlockchainStatus] = useState<{
+    step: 'idle' | 'hashing' | 'registering' | 'confirming' | 'complete';
+    message: string;
+  }>({
+    step: 'idle',
+    message: ''
+  })
+  const [fileHash, setFileHash] = useState<string>('')
+
+  // Debug form state changes
+  useEffect(() => {
+    console.log('Form state updated:', {
+      formData,
+      uploadedFile: !!uploadedFile,
+      fileHash,
+      isLoading,
+      success: !!success,
+      error: !!error
+    })
+  }, [formData, uploadedFile, fileHash, isLoading, success, error])
+
+  // Debug component mount
+  useEffect(() => {
+    alert('🎯 INTAKE FORM COMPONENT MOUNTED!')
+    console.log('🎯🎯🎯 INTAKE FORM COMPONENT MOUNTED 🎯🎯🎯')
+  }, [])
+
+  const createDefaultCase = async () => {
+    try {
+      setIsCreatingDefaultCase(true)
+      const defaultCaseNumber = `CASE-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-001`
+      const res = await createCase(defaultCaseNumber)
+      console.log('Default case creation result:', res)
+      if ('ok' in res) {
+        const newCase = {
+          id: res.ok.id,
+          caseNumber: res.ok.caseNumber,
+          leadInvestigator: { id: "", name: "", badgeNumber: "" },
+        }
+        setCases([newCase])
+        setFormData(prev => ({ ...prev, caseId: res.ok.id }))
+        console.log('Default case created:', res.ok.caseNumber, 'with ID:', res.ok.id)
+        
+        // Also store in localStorage for cases manager
+        try {
+          if (typeof window !== 'undefined') {
+            const existingCases = JSON.parse(window.localStorage.getItem('lv_known_cases') || '[]')
+            const updatedCases = [...existingCases, { id: res.ok.id, caseNumber: res.ok.caseNumber }]
+            window.localStorage.setItem('lv_known_cases', JSON.stringify(updatedCases))
+            console.log('Case stored in localStorage:', updatedCases)
+          }
+        } catch (e) {
+          console.error('Failed to store case in localStorage:', e)
+        }
+        
+        return true
+      } else {
+        console.error('Failed to create default case:', res.err)
+      }
+    } catch (error) {
+      console.error('Failed to create default case:', error)
+    } finally {
+      setIsCreatingDefaultCase(false)
+    }
+    return false
+  }
 
   useEffect(() => {
     let mounted = true
@@ -54,17 +127,25 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
         setIsLoadingCases(true)
         const results = await listCases()
         if (!mounted) return
-        // Map to local Case shape minimally
-        setCases(
-          results.map((c) => ({
-            id: c.id,
-            caseNumber: c.caseNumber,
-            leadInvestigator: { id: "", name: "", badgeNumber: "" },
-          })),
-        )
+        
+        if (results.length === 0) {
+          // No cases exist, create a default one
+          const created = await createDefaultCase()
+          if (!created && !mounted) return
+        } else {
+          // Map to local Case shape minimally
+          setCases(
+            results.map((c) => ({
+              id: c.id,
+              caseNumber: c.caseNumber,
+              leadInvestigator: { id: "", name: "", badgeNumber: "" },
+            })),
+          )
+        }
       } catch {
         if (!mounted) return
-        setCases([])
+        // Try to create a default case even if listCases fails
+        await createDefaultCase()
       } finally {
         if (!mounted) return
         setIsLoadingCases(false)
@@ -79,43 +160,108 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
+    console.log('Form input changed:', { name, value })
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
   const handleSelectChange = (value: string) => {
+    console.log('Evidence type selected:', value)
     setFormData((prev) => ({ ...prev, evidenceType: value }))
   }
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
+    console.log('File uploaded:', file.name, file.size)
     setUploadedFile(file)
+    try {
+      setBlockchainStatus({ step: 'hashing', message: 'Computing file hash...' })
+      const hash = await computeFileHash(file)
+      setFileHash(hash)
+      console.log('File hash computed:', hash)
+      setBlockchainStatus({ step: 'idle', message: '' })
+    } catch (error) {
+      console.error('Error computing file hash:', error)
+      setError('Failed to compute file hash')
+      setBlockchainStatus({ step: 'idle', message: '' })
+    }
   }
 
   const handleSubmit = async () => {
-    if (!uploadedFile || !user) return
+    alert('🚀 HANDLE SUBMIT CALLED!')
+    console.log('🚀🚀🚀 HANDLE SUBMIT CALLED 🚀🚀🚀', { uploadedFile: !!uploadedFile, user: !!user, formData })
+    if (!uploadedFile || !user) {
+      console.log('❌ Missing requirements:', { uploadedFile: !!uploadedFile, user: !!user })
+      alert('❌ Missing file or user not logged in!')
+      setError('Please upload a file and ensure you are logged in')
+      return
+    }
 
     setIsLoading(true)
     setError(null)
     setSuccess(null)
+    console.log('Starting evidence submission...')
 
     try {
-      // In on-chain flow, compute or receive initial hash and store references via canister.
-      // Placeholder for file processing (hashing/upload handled off-chain or by separate flow)
-      const initialHash = "" // compute client-side if needed
-      const storyProtocolIpId = ""
-      const icpCanisterId = ""
+      // Ensure we have a case ID - create one if needed
+      let caseId = formData.caseId
+      console.log('Current case ID:', caseId)
+      if (!caseId) {
+        console.log('No case ID found, creating default case...')
+        const created = await createDefaultCase()
+        if (!created) {
+          throw new Error('Failed to create a case for evidence logging')
+        }
+        caseId = formData.caseId
+        console.log('Default case created with ID:', caseId)
+      }
+
+      // Use the computed file hash for evidence integrity
+      console.log('🔐🔐🔐 COMPUTING FILE HASH 🔐🔐🔐')
+      console.log('File details:', { name: uploadedFile.name, size: uploadedFile.size, type: uploadedFile.type })
+      const initialHash = fileHash || await computeFileHash(uploadedFile)
+      console.log('🔐 File hash computed:', initialHash)
+
+      setBlockchainStatus({ step: 'registering', message: 'Registering evidence on Story Protocol blockchain...' })
 
       const typeVariant = (EvidenceTypeEnum as any)[formData.evidenceType] ?? EvidenceTypeEnum.OTHER
-      const attemptLog = async () =>
-        await logEvidence({
-          caseId: formData.caseId,
+      
+      // Get the user's identity for authenticated evidence logging
+      console.log('Getting user identity...')
+      const authClient = await AuthClient.create()
+      const isAuthenticated = await authClient.isAuthenticated()
+      console.log('User authenticated:', isAuthenticated)
+      
+      if (!isAuthenticated) {
+        throw new Error('User is not authenticated. Please log in again.')
+      }
+      
+      const identity = await authClient.getIdentity()
+      console.log('Identity obtained:', !!identity, 'Principal:', identity?.getPrincipal()?.toText())
+      
+      const attemptLog = async () => {
+        console.log('🔥🔥🔥 ATTEMPTING TO LOG EVIDENCE 🔥🔥🔥')
+        console.log('Evidence parameters:', {
+          caseId,
           itemNumber: formData.itemNumber,
           evidenceType: typeVariant,
           description: formData.description,
           location: formData.location,
           initialHash,
-          storyProtocolIpId,
-          icpCanisterId,
+          hasIdentity: !!identity
         })
+        
+        const result = await logEvidenceAuthenticated({
+          caseId: caseId,
+          itemNumber: formData.itemNumber,
+          evidenceType: typeVariant,
+          description: formData.description,
+          location: formData.location,
+          initialHash,
+          identity,
+        })
+        
+        console.log('🔥🔥🔥 EVIDENCE LOGGING RESULT 🔥🔥🔥', result)
+        return result
+      }
 
       let res = await attemptLog()
 
@@ -130,15 +276,28 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
             role: roleVariant,
           })
           res = await attemptLog()
-        } catch {}
+        } catch (regError) {
+          console.error('User registration failed:', regError)
+        }
       }
 
-      if ('err' in res) throw new Error(res.err)
+      if ('err' in res) {
+        console.log('❌❌❌ EVIDENCE LOGGING FAILED ❌❌❌', res.err)
+        throw new Error(res.err)
+      }
+
+      console.log('✅✅✅ EVIDENCE LOGGING SUCCESS ✅✅✅', res.ok)
 
       // If returned evidence looks like a dev mock, do not show success UI
       if (isMockEvidence(res.ok)) {
+        console.log('⚠️⚠️⚠️ MOCK EVIDENCE DETECTED ⚠️⚠️⚠️')
         throw new Error("Canister not deployed: evidence not recorded on-chain")
       }
+
+      setBlockchainStatus({ 
+        step: 'complete', 
+        message: `Successfully registered on blockchain! Story Protocol ID: ${formatHashForDisplay(res.ok.storyProtocolIpId)}` 
+      })
 
       const evidenceRecord = {
         ...formData,
@@ -160,6 +319,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
       }
 
       // Persist locally so the dashboard can read (also useful in real flow as cache)
+      console.log('💾💾💾 STORING EVIDENCE LOCALLY 💾💾💾')
       try {
         if (typeof window !== 'undefined') {
           const selectedCase = cases.find(c => c.id === formData.caseId)
@@ -188,8 +348,10 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
             },
             custodyLogs: [],
           }
+          console.log('💾 Storing evidence:', toStore)
           const dedup = [...stored.filter(e => e.id !== toStore.id), toStore]
           window.localStorage.setItem('lv_mock_evidence', JSON.stringify(dedup))
+          console.log('💾 Evidence stored in localStorage')
 
           // Maintain quick index per case
           const mapRaw = window.localStorage.getItem('lv_case_evidence_ids')
@@ -198,12 +360,18 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
           const arr = new Set([...(map[formData.caseId] || []), toStore.id, backendId, shortId].filter(Boolean) as string[])
           map[formData.caseId] = Array.from(arr)
           window.localStorage.setItem('lv_case_evidence_ids', JSON.stringify(map))
+          console.log('💾 Case evidence index updated')
         }
-      } catch {}
+      } catch (e) {
+        console.error('💾 Failed to store evidence locally:', e)
+      }
 
       setEvidenceData(evidenceRecord)
       setSuccess(`Evidence item ${formData.itemNumber} recorded successfully!`)
+      console.log('🎉🎉🎉 EVIDENCE CREATION COMPLETED SUCCESSFULLY 🎉🎉🎉')
+      console.log('Evidence record:', evidenceRecord)
     } catch (err) {
+      console.error('Error in handleSubmit:', err)
       const message = err instanceof Error ? err.message : String(err)
       // Provide a helpful hint when canister is not deployed (dev flow)
       const cfg = getContractConfig()
@@ -214,6 +382,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
       console.error('Error creating evidence item:', err)
       setError(hint)
     } finally {
+      console.log('handleSubmit completed, setting loading to false')
       setIsLoading(false)
     }
   }
@@ -242,6 +411,10 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* DEBUG: This should show if the form is rendered */}
+      <div style={{ background: 'red', color: 'white', padding: '10px', margin: '10px' }}>
+        🚨 DEBUG: INTAKE FORM IS RENDERED! 🚨
+      </div>
       {/* Left Column */}
       <Card className="border border-border bg-card p-6">
         <h2 className="mb-6 text-xl font-semibold text-foreground">Case & Evidence Details</h2>
@@ -251,11 +424,18 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
             <label className="block text-sm font-medium text-foreground mb-2">Case</label>
             <Select value={formData.caseId} onValueChange={(value) => setFormData(prev => ({ ...prev, caseId: value }))}>
               <SelectTrigger className="bg-input border-border text-foreground">
-                <SelectValue placeholder={isLoadingCases ? "Loading cases..." : "Select a case"} />
+                <SelectValue placeholder={
+                  isLoadingCases ? "Loading cases..." : 
+                  isCreatingDefaultCase ? "Creating default case..." : 
+                  "Select a case"
+                } />
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
-                {isLoadingCases ? (
-                  <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading cases...</div>
+                {isLoadingCases || isCreatingDefaultCase ? (
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {isCreatingDefaultCase ? "Creating default case..." : "Loading cases..."}
+                  </div>
                 ) : Array.isArray(cases) && cases.length > 0 ? (
                   cases.map((caseItem) => (
                     <SelectItem key={caseItem.id} value={caseItem.id}>
@@ -267,6 +447,25 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
                 )}
               </SelectContent>
             </Select>
+            {!isLoadingCases && Array.isArray(cases) && cases.length === 0 && (
+              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-sm text-blue-800 mb-2">
+                  No cases found. You can create a case manually or continue with evidence logging.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-blue-800 border-blue-300 hover:bg-blue-100"
+                  onClick={() => {
+                    if (onNavigateToCases) {
+                      onNavigateToCases()
+                    }
+                  }}
+                >
+                  Manage Cases
+                </Button>
+              </div>
+            )}
           </div>
 
           <div>
@@ -363,6 +562,23 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
         <FileUploadArea onFileUpload={handleFileUpload} />
 
+        {blockchainStatus.step !== 'idle' && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <div className="flex items-center gap-2">
+              {blockchainStatus.step !== 'complete' && <Loader2 className="h-4 w-4 animate-spin" />}
+              <span className="text-sm text-blue-800">{blockchainStatus.message}</span>
+            </div>
+          </div>
+        )}
+
+        {fileHash && (
+          <div className="mb-4 p-3 bg-muted border border-border rounded-md">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium">File Hash:</span> {formatHashForDisplay(fileHash)}
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
             <p className="text-sm text-destructive">{error}</p>
@@ -393,14 +609,34 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
         )}
 
         <Button
-          onClick={handleSubmit}
-          disabled={!uploadedFile || !formData.caseId || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading || !!success}
+          onClick={() => {
+            alert('🔥 BUTTON CLICKED! Check console for details.')
+            console.log('🔥🔥🔥 SUBMIT BUTTON CLICKED 🔥🔥🔥')
+            console.log('Form validation:', {
+              uploadedFile: !!uploadedFile,
+              itemNumber: formData.itemNumber,
+              evidenceType: formData.evidenceType,
+              description: formData.description,
+              isLoading,
+              success: !!success,
+              isCreatingDefaultCase
+            })
+            console.log('Current formData:', formData)
+            console.log('Button disabled:', !uploadedFile || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading || !!success || isCreatingDefaultCase)
+            handleSubmit()
+          }}
+          disabled={!uploadedFile || !formData.itemNumber || !formData.evidenceType || !formData.description || isLoading || !!success || isCreatingDefaultCase}
           className="mt-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-6 text-base"
         >
           {isLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               Processing...
+            </>
+          ) : isCreatingDefaultCase ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Creating Case...
             </>
           ) : success ? (
             "Evidence Recorded Successfully"
