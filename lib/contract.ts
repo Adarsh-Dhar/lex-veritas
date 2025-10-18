@@ -274,6 +274,7 @@ export interface ContractService {
   getCaseEvidence: (caseId: string) => Promise<[] | [string[]]>;
   getMyProfile: () => Promise<[] | [User]>;
   getCanisterEthAddress: () => Promise<string>;
+  initializeEthAddress: () => Promise<string>;
   checkBalance: () => Promise<Result<string>>;
 }
 
@@ -404,54 +405,26 @@ export async function logEvidence(params: {
   location: string;
   initialHash: string;
 }): Promise<Result<EvidenceItem>> {
-  try {
-    console.log('[logEvidence] Starting with params:', params);
-    const actor = await getContractActor();
-    console.log('[logEvidence] Actor obtained, calling logEvidence...');
-    
-    const result = await actor.logEvidence(
-      params.caseId,
-      params.itemNumber,
-      params.evidenceType,
-      params.description,
-      params.location,
-      params.initialHash
-    );
-    
-    console.log('[logEvidence] Result received:', result);
-    return result;
-  } catch (error: any) {
-    console.log('[logEvidence] Error caught:', error);
-    const msg = String(error?.message || error || "");
-    console.log('[logEvidence] Error message:', msg);
-    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
-    console.log('[logEvidence] Is no wasm error:', isNoWasm);
-    
-    if (isNoWasm) {
-      // Development-friendly fallback so the UI can function without a deployed canister
-      const now = Date.now();
-      const mock: EvidenceItem = {
-        id: `EV-${now}`,
-        caseId: params.caseId,
-        itemNumber: params.itemNumber,
-        evidenceType: params.evidenceType,
-        description: params.description,
-        collectedAt: BigInt(now),
-        location: params.location,
-        collectedById: "2vxsx-fae", // anonymous principal placeholder
-        initialHash: params.initialHash || `mock-hash-${now}`,
-        storyProtocolIpId: `mock-ipa-${now}`,
-        icpCanisterId: "aaaaa-aa",
-        custodyLogs: [],
-      };
-      // eslint-disable-next-line no-console
-      console.warn("[contract.logEvidence] Canister has no wasm. Returning mock evidence for development.");
-      console.log('[logEvidence] Returning mock evidence:', mock);
-      return { ok: mock };
-    }
-    console.log('[logEvidence] Returning error:', { err: msg });
-    return { err: msg };
+  console.log('[logEvidence] Starting with params:', params);
+  const actor = await getContractActor();
+  console.log('[logEvidence] Actor obtained, calling logEvidence...');
+  
+  const result = await actor.logEvidence(
+    params.caseId,
+    params.itemNumber,
+    params.evidenceType,
+    params.description,
+    params.location,
+    params.initialHash
+  );
+  
+  console.log('[logEvidence] Result received:', result);
+  
+  if ('err' in result) {
+    throw new Error(result.err);
   }
+  
+  return result;
 }
 
 export async function logEvidenceAuthenticated(params: {
@@ -463,54 +436,32 @@ export async function logEvidenceAuthenticated(params: {
   initialHash: string;
   identity: unknown;
 }): Promise<Result<EvidenceItem>> {
-  try {
-    console.log('[logEvidenceAuthenticated] Starting with params:', {
-      caseId: params.caseId,
-      itemNumber: params.itemNumber,
-      evidenceType: params.evidenceType,
-      hasIdentity: !!params.identity
-    });
-    
-    const actor = await createAuthenticatedContractActor(params.identity);
-    console.log('[logEvidenceAuthenticated] Actor created, calling logEvidence...');
-    
-    const result = await actor.logEvidence(
-      params.caseId,
-      params.itemNumber,
-      params.evidenceType,
-      params.description,
-      params.location,
-      params.initialHash
-    );
-    
-    console.log('[logEvidenceAuthenticated] Result:', result);
-    return result;
-  } catch (error: any) {
-    const msg = String(error?.message || error || "");
-    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
-    if (isNoWasm) {
-      // Development-friendly fallback so the UI can function without a deployed canister
-      const now = Date.now();
-      const mock: EvidenceItem = {
-        id: `EV-${now}`,
-        caseId: params.caseId,
-        itemNumber: params.itemNumber,
-        evidenceType: params.evidenceType,
-        description: params.description,
-        collectedAt: BigInt(now),
-        location: params.location,
-        collectedById: "2vxsx-fae", // anonymous principal placeholder
-        initialHash: params.initialHash || `mock-hash-${now}`,
-        storyProtocolIpId: `mock-ipa-${now}`,
-        icpCanisterId: "aaaaa-aa",
-        custodyLogs: [],
-      };
-      // eslint-disable-next-line no-console
-      console.warn("[contract.logEvidenceAuthenticated] Canister has no wasm. Returning mock evidence for development.");
-      return { ok: mock };
-    }
-    return { err: msg };
+  console.log('[logEvidenceAuthenticated] Starting with params:', {
+    caseId: params.caseId,
+    itemNumber: params.itemNumber,
+    evidenceType: params.evidenceType,
+    hasIdentity: !!params.identity
+  });
+  
+  const actor = await createAuthenticatedContractActor(params.identity);
+  console.log('[logEvidenceAuthenticated] Actor created, calling logEvidence...');
+  
+  const result = await actor.logEvidence(
+    params.caseId,
+    params.itemNumber,
+    params.evidenceType,
+    params.description,
+    params.location,
+    params.initialHash
+  );
+  
+  console.log('[logEvidenceAuthenticated] Result:', result);
+  
+  if ('err' in result) {
+    throw new Error(result.err);
   }
+  
+  return result;
 }
 
 export async function updateUserRoleAuthenticated(params: {
@@ -548,95 +499,17 @@ export async function transferCustody(params: {
 }
 
 export async function getEvidenceHistory(evidenceId: string): Promise<EvidenceItem | null> {
-  try {
-    const actor = await getContractActor();
-    const res = await actor.getEvidenceHistory(evidenceId);
-    const [value] = res;
-    return value ?? null;
-  } catch (error: any) {
-    const msg = String(error?.message || error || "");
-    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
-    if (isNoWasm) {
-      try {
-        if (typeof window !== 'undefined') {
-          const raw = window.localStorage.getItem('lv_mock_evidence');
-          if (raw) {
-            const list = JSON.parse(raw) as any[];
-            let found = list.find((e) => e.id === evidenceId);
-            if (!found) {
-              const byComposite = list.find((e) => typeof e.case?.id === 'string' && typeof e.itemNumber === 'string' && `CASE-${e.case.id}-${e.itemNumber}` === evidenceId)
-              if (byComposite) found = byComposite
-            }
-            if (!found) {
-              const byShort = list.find((e) => typeof e.case?.caseNumber === 'string' && typeof e.itemNumber === 'string' && `${e.case.caseNumber}-${e.itemNumber}` === evidenceId)
-              if (byShort) found = byShort
-            }
-            if (found) {
-              return {
-                id: found.id,
-                caseId: found.case.id,
-                itemNumber: found.itemNumber,
-                evidenceType: (EvidenceTypeEnum as any)[found.evidenceType] ?? EvidenceTypeEnum.OTHER,
-                description: found.description,
-                collectedAt: BigInt(Date.parse(found.collectedAt || new Date().toISOString())),
-                location: found.location,
-                collectedById: found.collectedBy?.id || '2vxsx-fae',
-                initialHash: found.initialHash,
-                storyProtocolIpId: found.storyProtocolIpId,
-                icpCanisterId: found.icpCanisterId,
-                custodyLogs: [],
-              } as EvidenceItem;
-            }
-          }
-        }
-      } catch {}
-      return null;
-    }
-    throw error;
-  }
+  const actor = await getContractActor();
+  const res = await actor.getEvidenceHistory(evidenceId);
+  const [value] = res;
+  return value ?? null;
 }
 
 export async function getCaseEvidence(caseId: string): Promise<string[] | null> {
-  try {
-    const actor = await getContractActor();
-    const res = await actor.getCaseEvidence(caseId);
-    const [value] = res;
-    return value ?? null;
-  } catch (error: any) {
-    const msg = String(error?.message || error || "");
-    const isNoWasm = msg.includes("IC0537") || msg.toLowerCase().includes("no wasm module");
-    if (isNoWasm) {
-      try {
-        if (typeof window !== 'undefined') {
-          const mapRaw = window.localStorage.getItem('lv_case_evidence_ids');
-          if (mapRaw) {
-            const map = JSON.parse(mapRaw) as Record<string, string[]>;
-            const ids = map[caseId]
-            if (ids && ids.length) return ids;
-          }
-          const evRaw = window.localStorage.getItem('lv_mock_evidence');
-          if (evRaw) {
-            const list = JSON.parse(evRaw) as any[];
-            const variants = new Set<string>();
-            for (const e of list) {
-              if (e?.case?.id !== caseId) continue;
-              const rawId = typeof e.id === 'string' ? e.id : ''
-              const composite = `CASE-${e.case.id}-${e.itemNumber}`
-              const shortId = `${e.case.caseNumber}-${e.itemNumber}`
-              if (rawId) variants.add(rawId)
-              variants.add(composite)
-              variants.add(shortId)
-            }
-            return Array.from(variants)
-          }
-        }
-      } catch {}
-      // eslint-disable-next-line no-console
-      console.warn("[contract.getCaseEvidence] Canister has no wasm. Returning empty list for development.");
-      return [];
-    }
-    throw error;
-  }
+  const actor = await getContractActor();
+  const res = await actor.getCaseEvidence(caseId);
+  const [value] = res;
+  return value ?? null;
 }
 
 export async function getMyProfile(): Promise<User | null> {
@@ -649,6 +522,11 @@ export async function getMyProfile(): Promise<User | null> {
 export async function getCanisterEthAddress(): Promise<string> {
   const actor = await getContractActor();
   return await actor.getCanisterEthAddress();
+}
+
+export async function initializeEthAddress(): Promise<string> {
+  const actor = await getContractActor();
+  return await actor.initializeEthAddress();
 }
 
 export async function checkBalance(): Promise<Result<string>> {
