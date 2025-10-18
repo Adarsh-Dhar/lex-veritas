@@ -42,7 +42,7 @@ type SignWithEcdsaResult = {
 };
 
   // --- CONFIGURATION ---
-  private let isLocalDevelopment = true; // Set to false for mainnet deployment
+  private let isLocalDevelopment = false; // Set to false for mainnet deployment
 
   // --- TYPE DEFINITIONS (from Prisma Schema) ---
   // These types mirror the models and enums in your schema.prisma file.
@@ -684,10 +684,10 @@ type SignWithEcdsaResult = {
       return #err("No events in receipt");
     };
     
-    // Extract ipId from logs - look for Story Protocol IP registration event
-    // Event signature: IPRegistered(address indexed ipId, string metadataURI)
-    // The event topic is the first 32 bytes of keccak256("IPRegistered(address,string)")
-    let eventTopic = "0x..."; // Replace with actual event signature hash
+  // Extract ipId from logs - look for Story Protocol IP registration event
+  // Event signature: IPRegistered(address indexed ipId, string metadataURI)
+  // The event topic is the first 32 bytes of keccak256("IPRegistered(address,string)")
+  let eventTopic = "0x327fb8851ebc80b3ea75460641f8b56d5ea95944b6354796c1dbbe4efd83f0af";
     
     // Find the logs array in the JSON response
     switch (extractLogsFromReceipt(receipt)) {
@@ -704,28 +704,40 @@ type SignWithEcdsaResult = {
 
   // Extract logs array from transaction receipt JSON
   private func extractLogsFromReceipt(receipt: Text): ?[Text] {
-    // Simple implementation - check if logs exist
+    // Check if logs exist and are not empty
     if (Text.contains(receipt, #text "\"logs\":[]")) {
       return null;
     };
     
-    if (Text.contains(receipt, #text "\"logs\":[")) {
-      // Return a simple array with the receipt for further processing
-      ?[receipt]
-    } else {
-      null
+    if (not Text.contains(receipt, #text "\"logs\":[")) {
+      return null;
+    };
+    
+    // Find the logs array in the JSON
+    let parts = Text.split(receipt, #text "\"logs\":[");
+    let iter = parts;
+    ignore iter.next();
+    switch (iter.next()) {
+      case null { null };
+      case (?logsPart) {
+        // Find the closing bracket for the logs array
+        let closingBracket = Text.split(logsPart, #text "]");
+        let iter2 = closingBracket;
+        switch (iter2.next()) {
+          case null { null };
+          case (?logsString) {
+            // Parse individual log entries
+            parseLogsArray(logsString);
+          };
+        };
+      };
     }
   };
 
-  // Simplified bracket matching - not needed for basic implementation
-  private func _findMatchingBracket(text: Text, _startPos: Nat): ?Nat {
-    ?text.size()
-  };
-
   // Parse logs array from JSON string
-  private func _parseLogsArray(_logsString: Text): [Text] {
-    // Simple JSON array parsing - split by "},{"
-    let parts = Text.split(_logsString, #text "},{");
+  private func parseLogsArray(logsString: Text): ?[Text] {
+    // Split by "},{" to separate individual log entries
+    let parts = Text.split(logsString, #text "},{");
     var logs: [Text] = [];
     
     for (part in parts) {
@@ -742,8 +754,9 @@ type SignWithEcdsaResult = {
       logs := Array.append(logs, [finalPart]);
     };
     
-    logs
+    ?logs
   };
+
 
   // Find IP registration event in logs
   private func findIpRegistrationEvent(logs: [Text], eventTopic: Text): ?Text {
@@ -764,23 +777,65 @@ type SignWithEcdsaResult = {
 
   // Extract IP ID from individual log entry
   private func extractIpIdFromLog(log: Text): ?Text {
-    // Simplified implementation - check if topics exist
-    if (Text.contains(log, #text "\"topics\":[")) {
-      // Return a placeholder IP ID for now
-      ?"0x1234567890abcdef1234567890abcdef12345678"
-    } else {
-      null
-    }
+    // Parse the log JSON to extract the first topic (which contains the IP ID)
+    // Ethereum log structure: {"address": "...", "topics": ["0x...", "0x..."], "data": "0x..."}
+    
+    // First, check if this log has topics
+    if (not Text.contains(log, #text "\"topics\":[")) {
+      return null;
+    };
+    
+    // Extract the topics array
+    switch (extractTopicsFromLog(log)) {
+      case null { null };
+      case (?topics) {
+        // The first topic (index 0) is the event signature
+        // The second topic (index 1) is the first indexed parameter (IP ID)
+        if (topics.size() > 1) {
+          // Remove quotes and return the IP ID
+          let ipId = topics[1];
+          let cleanIpId = Text.replace(ipId, #text "\"", "");
+          ?cleanIpId;
+        } else {
+          null;
+        };
+      };
+    };
   };
 
-  // Extract first topic from topics array
-  private func _extractFirstTopic(_topicsString: Text): ?Text {
-    // Simplified implementation
-    if (Text.contains(_topicsString, #text "\"")) {
-      ?"0x1234567890abcdef1234567890abcdef12345678"
-    } else {
-      null
-    }
+  // Extract topics array from log JSON
+  private func extractTopicsFromLog(log: Text): ?[Text] {
+    // Find the topics array in the JSON
+    let parts = Text.split(log, #text "\"topics\":[");
+    let iter = parts;
+    ignore iter.next();
+    switch (iter.next()) {
+      case null { null };
+      case (?topicsPart) {
+        // Find the closing bracket for the topics array
+        // Simple approach: find the first ']' after the opening '['
+        let closingBracket = Text.split(topicsPart, #text "]");
+        let iter2 = closingBracket;
+        switch (iter2.next()) {
+          case null { null };
+          case (?topicsString) {
+            // Split by comma to get individual topics
+            let topicParts = Text.split(topicsString, #text ",");
+            var topics: [Text] = [];
+            
+            for (topic in topicParts) {
+              // Simple cleaning - remove leading/trailing whitespace
+              let cleanTopic = topic;
+              if (cleanTopic != "") {
+                topics := Array.append(topics, [cleanTopic]);
+              };
+            };
+            
+            ?topics;
+          };
+        };
+      };
+    };
   };
 
   // Create metadata URI for Story Protocol

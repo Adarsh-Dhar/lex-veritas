@@ -1,0 +1,12 @@
+# Environment Configuration Template for ICP Playground
+# Copy this content to .env.local and replace YOUR_CANISTER_ID with the actual canister ID
+
+NEXT_PUBLIC_CONTRACT_BACKEND_CANISTER_ID=YOUR_CANISTER_ID
+NEXT_PUBLIC_IC_HOST=https://icp-api.io
+
+# Instructions:
+# 1. Deploy your canister to ICP Playground (https://playground.internetcomputer.org/)
+# 2. Copy the generated canister ID
+# 3. Replace YOUR_CANISTER_ID above with the actual canister ID
+# 4. Copy this content to .env.local
+# 5. Restart your Next.js development server

@@ -16,10 +16,6 @@
           "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
         }
       }
-    },
-    "evm_rpc": {
-      "type": "pull",
-      "id": "7hfb6-caaaa-aaaar-qadga-cai"
     }
   },
   "defaults": {
